@@ -16,7 +16,7 @@ SAVE = "super_mona_kart"
 DEFAULTS = {"lights": True, "assist": True, "tilt": False, "fps": False, "fast": False,
             "best": {}, "tt_best": {}, "best_lap": {}, "cups": {}, "hard": False}
 MAX_SUBSTEP = 0.05      # physics never steps more than 50 ms at a time
-MAX_FRAME = 0.2         # a frame slower than this is treated as 200 ms
+MAX_FRAME = 0.5         # a frame slower than this (a hitch) is treated as 500 ms
 
 TITLE, MENU, CHARS, DIFF, TRACKSEL, INTRO, RACE, PAUSE, RESULTS, STANDINGS, PODIUM, SETTINGS, PARTY = range(13)
 
@@ -377,23 +377,25 @@ class Game:
         r = self.race
         me = r.karts[self.me]
         a = self.art
-        controls = {self.me: self.controls.race(min(dt, MAX_SUBSTEP), self.save["assist"])}
         if self.party:
             self.party.before_step(dt)
         # slow frames run several short physics steps, so a badge at 15 fps
-        # drives exactly as far as one at 60 fps
+        # steers and drives exactly as far as one at 60 fps
         n = 1
         while dt / n > MAX_SUBSTEP:
             n += 1
         sub = dt / n
+        start = r.clock_ms
+        end = self.party.clock() if self.party else None
         for i in range(n):
-            clock = self.party.clock() if (self.party and i == n - 1) else None
-            r.step(sub, controls, clock)
+            c = self.controls.race(sub, self.save["assist"])
+            if i:
+                c = c[:3] + (False,) + c[4:]     # one press fires one item
+            clock = None if end is None else start + (end - start) * (i + 1) // n
+            r.step(sub, {self.me: c}, clock)
             self.handle_events(r.events, me)
-            if i == 0:
-                controls = {self.me: controls[self.me][:3] + (False,) + controls[self.me][4:]}
-        if self.party:
-            self.party.after_step(dt)
+            if self.party:
+                self.party.after_step(sub)       # every substep's items go out
         w = self.world
         w.follow(me.x, me.y, me.heading, dt)
         if w.shake > 0:

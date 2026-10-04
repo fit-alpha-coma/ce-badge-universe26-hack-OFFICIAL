@@ -326,6 +326,45 @@ class OrderingTests(unittest.TestCase):
         self.assertEqual(want[:2], [1, 3])
 
 
+class ReviewRound2Tests(unittest.TestCase):
+    def test_race_clock_does_not_depend_on_frame_rate(self):
+        times = []
+        for fps in (30, 60, 45):
+            r = Race(TRACKS[0], [Entrant(0, HUMAN)], seed=1)
+            for _ in range(fps * 13):              # 3 s countdown + 10 s racing
+                r.step(1.0 / fps, {})
+            times.append(r.clock_ms)
+        self.assertTrue(max(times) - min(times) <= 2, times)
+
+    def test_time_after_go_is_not_thrown_away(self):
+        a = Race(TRACKS[0], [Entrant(0, HUMAN)], seed=1)
+        b = Race(TRACKS[0], [Entrant(0, HUMAN)], seed=1)
+        a.step(2.98, {})
+        b.step(2.98, {})
+        a.step(0.05, {})                          # crosses GO 30 ms early
+        for _ in range(2):
+            b.step(0.02, {})
+        b.step(0.01, {})
+        self.assertEqual(a.clock_ms, b.clock_ms)
+        self.assertAlmostEqual(a.karts[0].x, b.karts[0].x, delta=0.5)
+
+    def test_finish_order_is_canonical_with_dnfs_and_late_results(self):
+        r = Race(TRACKS[0], [Entrant(i, CPU) for i in range(4)], seed=2)
+        r.karts[3].dnf = True
+        r.finish_order.append(3)                  # a badge left first
+        r.karts[2].finished_ms = 52000
+        r.finish_order.append(2)                  # a slower result arrived first
+        r.finish(r.karts[1], 50000)
+        self.assertEqual(r.finish_order, [1, 2, 3])
+        self.assertEqual(r.finalize(), [1, 2, 0, 3])
+
+    def test_departed_karts_drop_behind_active_ones(self):
+        r = Race(TRACKS[0], [Entrant(i, CPU) for i in range(3)], seed=2)
+        r.karts[0].lap = 2
+        r.karts[0].dnf = r.karts[0].gone = True
+        self.assertEqual(r.standings()[-1].id, 0)
+
+
 class PartyPacketTests(unittest.TestCase):
     """Anyone on the network can send packets; junk must be dropped, not crash."""
 
@@ -345,6 +384,29 @@ class PartyPacketTests(unittest.TestCase):
         p.last_seq = {}
         p.seen = {}
         return p
+
+    def test_bad_hello_never_reaches_the_tables(self):
+        p = self.party()
+        p.addr_of, p.peers = {}, {}
+        for bad in ({"id": 9, "t": "hi", "c": "x", "tr": 0, "ms": 1},
+                    {"id": 9, "t": "hi", "c": 0, "tr": 0, "ms": 1e999},
+                    {"id": 9, "t": "hi", "c": 99, "tr": 0, "ms": 1}):
+            with self.assertRaises((ValueError, TypeError, OverflowError)):
+                p.parse_hello(bad)
+        self.assertEqual(p.peers, {})
+
+    def test_clock_offset_compensates_for_delay(self):
+        p = self.party()
+        p.sync, p.peers = {}, {}
+
+        class Now:
+            pass
+        sent = []
+        p.send = lambda m: sent.append(m)
+        p.game.now = 1100                         # pong arrives 100 ms after the ping
+        p.handle_lobby({"id": 9, "t": "po", "to": 5, "q": 1000, "h": 5050})
+        # host read 5050 halfway through the trip, at our 1050: offset 4000
+        self.assertEqual(p.sync[9], (100, 4000))
 
     def test_badge_ids_are_bound_to_their_first_address(self):
         p = self.party()

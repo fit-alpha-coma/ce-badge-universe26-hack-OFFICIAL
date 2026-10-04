@@ -24,7 +24,7 @@ import ui
 from ui import W, H, center, panel, prompt
 
 CONNECT, NOWIFI, LOBBY_S, RACING_S = range(4)
-BAD_PACKET = (ValueError, TypeError, KeyError, IndexError, AttributeError)
+BAD_PACKET = (ValueError, TypeError, KeyError, IndexError, AttributeError, OverflowError)
 HELLO_MS = 400
 STATE_MS = 66
 PEER_TIMEOUT_MS = 3500
@@ -58,6 +58,7 @@ class Party:
         self.last_seq = {}       # net id -> newest sequence number seen
         self.seen = {}           # net id -> last packet time during the race
         self.addr_of = {}        # net id -> the address it first spoke from
+        self.sync = {}           # host id -> (round trip ms, host clock minus ours)
         self.start_local = 0     # local time the countdown starts
         try:
             import secrets
@@ -161,14 +162,19 @@ class Party:
         a = g.art
         for msg, addr in self.net.receive():
             try:
+                if msg.get("t") == "hi":
+                    self.parse_hello(msg)   # fully valid before it touches any table
                 if self.trusted(msg, addr) and self.handle_lobby(msg):
                     return      # a start message moved us to the race
             except BAD_PACKET:
                 pass            # anyone on the network can send junk; drop it
+        ids = self.players()
         if g.now >= self.next_hello:
             self.next_hello = g.now + HELLO_MS
             self.send({"t": "hi", "c": self.char, "tr": self.track, "ms": g.now})
-        ids = self.players()
+            if ids[0] != self.id:
+                # measure the host's clock: round trip / 2 is the one-way delay
+                self.send({"t": "pg", "to": ids[0], "q": g.now})
         host = ids[0] == self.id
         if not host:
             self.track = self.peers[ids[0]].get("tr", self.track)
@@ -224,20 +230,33 @@ class Party:
             return True
         return known == addr
 
+    def parse_hello(self, msg):
+        c, tr, ms = int(msg["c"]), int(msg["tr"]), int(msg["ms"])
+        if not (0 <= c < len(CHARACTERS) and 0 <= tr < len(TRACKS) and 0 <= ms < 1 << 40):
+            raise ValueError("bad hello")
+        return c, tr, ms
+
     def handle_lobby(self, msg):
         """Returns True when a start message began a race."""
         pid = msg["id"]
         if pid == self.id:
             return False
         t = msg.get("t")
+        now = self.game.now
         if t == "hi":
+            c, tr, ms = self.parse_hello(msg)
             if pid not in self.peers and len(self.peers) >= 2 * MAX_PLAYERS:
                 return False    # do not let a flood of fake badges grow the table
-            d = self.peers.setdefault(pid, {})
-            d["c"] = int(msg.get("c", 0)) % len(CHARACTERS)
-            d["tr"] = int(msg.get("tr", 0)) % len(TRACKS)
-            d["seen"] = self.game.now
-            d["off"] = int(msg["ms"]) - self.game.now   # their clock minus ours
+            self.peers[pid] = {"c": c, "tr": tr, "seen": now, "off": ms - now}
+        elif t == "pg" and int(msg["to"]) == self.id:
+            self.send({"t": "po", "to": pid, "q": int(msg["q"]), "h": now})
+        elif t == "po" and int(msg["to"]) == self.id:
+            rtt = now - int(msg["q"])
+            if 0 <= rtt < 2000:
+                off = int(msg["h"]) + rtt // 2 - now
+                best = self.sync.get(pid)
+                if best is None or rtt <= best[0]:
+                    self.sync[pid] = (rtt, off)
         elif t == "go":
             start = self.check_start(msg)
             # only a host we have heard from can start us, and only into a race
@@ -301,7 +320,12 @@ class Party:
             self.owner[len(entrants) - 1] = host
         self.members = set(ids)
         # the countdown starts at host time `at`; convert it to this badge's clock
-        offset = 0 if host == self.id else self.peers.get(host, {}).get("off", 0)
+        if host == self.id:
+            offset = 0
+        elif host in self.sync:
+            offset = self.sync[host][1]      # ping-measured, delay compensated
+        else:
+            offset = self.peers.get(host, {}).get("off", 0)
         self.start_local = start["at"] - offset
         self.track = start["tr"]
         g.race = Race(TRACKS[self.track], entrants, difficulty=1, seed=start["seed"],
@@ -346,6 +370,7 @@ class Party:
                             k.dnf = True
                             if kidx not in r.finish_order:
                                 r.finish_order.append(kidx)
+                r.reorder()
         for kidx, (e, seen) in self.remote.items():
             k = r.karts[kidx]
             if self.owned(kidx) or k.gone:
@@ -368,9 +393,7 @@ class Party:
             if fin is not None and k.finished_ms is None and not k.dnf and kidx not in r.finish_order:
                 k.finished_ms = fin
                 r.finish_order.append(kidx)
-                # finishers by time; DNFs (no time) stay after them
-                r.finish_order.sort(key=lambda i: (r.karts[i].finished_ms is None,
-                                                   r.karts[i].finished_ms or 0, i))
+                r.reorder()
 
     def handle_race(self, msg, now):
         pid = msg["id"]

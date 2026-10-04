@@ -173,6 +173,24 @@ public.
 | 18 | Low | The emulator cannot tell touch from switches or simulate inversion | Accepted and documented: the game uses neither `touched()` nor `upside_down()` |
 | 19 | Low | DESIGN overstated the performance controls | Fixed in section 7 |
 
+### Round 2: Codex (gpt-6.1-sol, medium), 2026-10-04, 9 findings
+
+Codex confirmed the round-1 fixes in isolated MicroPython runs of every screen,
+found no PicoVector v3.1.0 signature mismatches, and saw `badgesim.py` fail
+correctly on a reproduced crash. New findings, all fixed with tests:
+
+| # | Sev | Finding | Fix |
+| --- | --- | --- | --- |
+| 1 | High | A malformed hello left a half-made peer and crashed the lobby; `1e999` overflowed | Hellos are validated completely before any table changes; `OverflowError` counts as a bad packet |
+| 2 | High | On slow frames, items fired in early substeps were never broadcast | The network drain runs after every substep |
+| 3 | High | Party results could place a DNF or slower racer first | One canonical order (finishers by time, then racers, then DNFs) after every change |
+| 4 | Medium | Departed karts still counted for positions, AI gaps and obstacles | DNFs rank last; departed karts leave live queries |
+| 5 | Medium | The shared clock included hello delivery delay | Ping/pong offset with half the round trip, lowest-latency sample kept |
+| 6 | Medium | Time after GO in the crossing step was dropped | The remainder races on |
+| 7 | Medium | Truncated milliseconds made records frame-rate dependent | The clock keeps its fraction (30, 45 and 60 fps agree within 2 ms) |
+| 8 | Medium | Steering eased once per frame, slower on slow badges | Steering updates every substep; one press fires one item |
+| 9 | Medium | Frames over 200 ms lost driving time against the shared clock | Up to 500 ms of backlog per frame, each substep with its own clock boundary |
+
 Two automated security reviews of the party code:
 
 - Malformed packets could raise and reset the badge. Fixed: every field is

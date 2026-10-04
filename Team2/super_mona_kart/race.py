@@ -54,6 +54,7 @@ class Race:
         self.ghost = []                       # (x, y, heading) samples of kart 0
         self._ghost_next = 0
         self._ranks = {}
+        self._frac = 0.0                      # sub-millisecond remainder of the clock
 
     # -- queries -----------------------------------------------------------------
 
@@ -61,19 +62,27 @@ class Race:
         return [k for k in self.karts if self.entrants[k.id].kind != CPU]
 
     def standings(self):
-        # MicroPython's sort is not stable: every key ends in the kart id so
-        # ties come out the same on every badge
+        """Finishers by time, then karts still racing by progress, then DNFs.
+        MicroPython's sort is not stable, so every key ends in the kart id and
+        ties come out the same on every badge."""
         def key(k):
             if k.finished_ms is not None:
                 return (0, k.finished_ms, 0, k.id)
+            if k.dnf:
+                return (2, 0, -k.progress(), k.id)
             return (1, 0, -k.progress(), k.id)
         return sorted(self.karts, key=key)
+
+    def reorder(self):
+        """Keep finish_order canonical after any finish, DNF or remote result."""
+        placed = set(self.finish_order)
+        self.finish_order = [k.id for k in self.standings() if k.id in placed]
 
     def rank_of(self, kart):
         return self._ranks.get(kart.id, 0)
 
     def gap_to_humans(self, kart):
-        hs = [h for h in self.humans() if h is not kart]
+        hs = [h for h in self.humans() if h is not kart and not h.gone]
         if not hs:
             return 0.0
         best = max(h.progress() for h in hs)
@@ -81,7 +90,7 @@ class Race:
 
     def obstacles(self, kart):
         for k in self.karts:
-            if k is not kart and k.fall <= 0:
+            if k is not kart and k.fall <= 0 and not k.gone:
                 yield k.x, k.y
         if self.items:
             for b in self.items.bugs:
@@ -110,7 +119,13 @@ class Race:
         if self.items:
             self.items.spawned = []
             self.items.consumed = []
-        ms = int(dt * 1000) if clock is None else max(0, clock - self.clock_ms)
+        if clock is None:
+            # keep the fraction, so the clock does not depend on the frame rate
+            total = dt * 1000.0 + self._frac
+            ms = int(total)
+            self._frac = total - ms
+        else:
+            ms = max(0, clock - self.clock_ms)
         if self.phase == COUNTDOWN:
             before = self.clock_ms
             self.clock_ms += ms
@@ -121,15 +136,22 @@ class Race:
                 self.events.append(("count", None, 3))
             elif 0 < n_after < n_before:
                 self.events.append(("count", None, n_after))
-            if self.clock_ms >= 0:
-                self.phase = RACING
-                self.clock_ms = 0
-                self.events.append(("go", None, None))
-                for k in self.karts:
-                    if self.entrants[k.id].kind == HUMAN and self.start_boosts:
-                        k.item = BOOST  # time trial hands out its boosts one by one
-            self._update_ranks()
-            return
+            if self.clock_ms < 0:
+                self._update_ranks()
+                return
+            # GO: race on with whatever part of this step came after it
+            rem = self.clock_ms
+            self.phase = RACING
+            self.clock_ms = 0
+            self.events.append(("go", None, None))
+            for k in self.karts:
+                if self.entrants[k.id].kind == HUMAN and self.start_boosts:
+                    k.item = BOOST  # time trial hands out its boosts one by one
+            if rem <= 0:
+                self._update_ranks()
+                return
+            ms = rem
+            dt = rem / 1000.0
         self.clock_ms += ms
         now = self.clock_ms
         for k in self.karts:
@@ -191,7 +213,8 @@ class Race:
     def finish(self, kart, now):
         kart.finished_ms = now
         self.finish_order.append(kart.id)
-        self.events.append(("finish", kart.id, len(self.finish_order)))
+        self.reorder()
+        self.events.append(("finish", kart.id, self.finish_order.index(kart.id) + 1))
 
     def _cooldown_driver(self, kart):
         d = Driver(kart, 0.5, 0.0, self.rng)
@@ -208,6 +231,7 @@ class Race:
             if k.finished_ms is None and k.id not in self.finish_order:
                 k.dnf = True
                 self.finish_order.append(k.id)
+        self.reorder()
         return self.finish_order
 
     def results(self):
