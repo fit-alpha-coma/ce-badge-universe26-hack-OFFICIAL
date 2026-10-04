@@ -54,7 +54,7 @@ def update():
 
 
 CONFIG = __CONFIG__
-simulator.realtime(CONFIG["play"])
+simulator.realtime(CONFIG["play"] or CONFIG["realtime"])
 
 import badgeware
 import _input
@@ -167,6 +167,8 @@ def main() -> int:
         default=Path(os.environ.get("BADGEWARE_SIMULATOR", Path.home() / "badgeware-simulator")),
         help="badgeware-simulator checkout (default $BADGEWARE_SIMULATOR or ~/badgeware-simulator)",
     )
+    parser.add_argument("--realtime", action="store_true",
+                        help="headless, but on the wall clock (for two badges talking)")
     parser.add_argument("--port-offset", type=int, default=0,
                         help="multiplayer: which simulated badge this is (0-3)")
     args = parser.parse_args()
@@ -185,7 +187,7 @@ def main() -> int:
     config = {
         "app": app.name, "play": args.play, "frames": args.frames,
         "shots": [int(s) for s in args.shots.split(",") if s],
-        "press": args.press, "tilt": args.tilt, "bits": BITS,
+        "press": args.press, "tilt": args.tilt, "bits": BITS, "realtime": args.realtime,
     }
     with tempfile.TemporaryDirectory(prefix="badgesim-") as tmp:
         work = Path(tmp)

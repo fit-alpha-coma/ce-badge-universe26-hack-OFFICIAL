@@ -71,10 +71,12 @@ class Items:
                 self.boxes.append(Box(x, y))
         self.bugs = []
         self.ducks = []
+        self.picked = []    # box indexes picked up locally this step (for party races)
 
     def step(self, dt, karts, rank_of, events):
         """Advance boxes, bugs and ducks; resolve pickups and hits."""
-        for box in self.boxes:
+        self.picked = []
+        for bi, box in enumerate(self.boxes):
             if box.respawn > 0:
                 box.respawn -= dt
                 continue
@@ -83,6 +85,7 @@ class Items:
                     continue
                 if (k.x - box.x) ** 2 + (k.y - box.y) ** 2 < BOX_RADIUS * BOX_RADIUS:
                     box.respawn = BOX_RESPAWN
+                    self.picked.append(bi)
                     if not k.item:
                         k.item = roll(rank_of(k), self.rng)
                         events.append(("item", k.id, k.item))
@@ -171,3 +174,15 @@ class Items:
                         events.append((result, k.id, PUSH))
         events.append(("use", kart.id, item))
         return True
+
+    # -- party races: things that happened on another badge ------------------------
+
+    def remote_box(self, index):
+        if 0 <= index < len(self.boxes):
+            self.boxes[index].respawn = BOX_RESPAWN
+
+    def remote_bug(self, x, y, owner):
+        self.bugs.append(Bug(x, y, owner))
+
+    def remote_duck(self, kart, target):
+        self.ducks.append(Duck(kart, target))

@@ -1,7 +1,7 @@
 # One race: karts, items, laps, standings and events. Plain Python, so a whole
 # race can run (and be tested) without a screen.
 
-import random
+from rng import Rng
 from config import CHARACTERS, DIFFICULTY, POINTS, BOOST
 from geom import Geometry
 from physics import Kart, collide
@@ -29,7 +29,7 @@ class Race:
         self.track = track
         self.geo = Geometry(track)
         self.laps = laps or track["laps"]
-        self.rng = random.Random(seed)
+        self.rng = Rng(seed)
         self.entrants = entrants
         diff = DIFFICULTY[difficulty]
         grid = grid or list(range(len(entrants)))

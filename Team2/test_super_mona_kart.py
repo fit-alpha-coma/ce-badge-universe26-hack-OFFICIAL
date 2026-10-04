@@ -4,7 +4,6 @@
 """
 
 import math
-import random
 import sys
 import unittest
 from pathlib import Path
@@ -17,6 +16,7 @@ from geom import Geometry, ROAD, CURB, DROP, SIZE  # noqa: E402
 from physics import Kart, DRIFT_LEVELS  # noqa: E402
 from items import Items, roll, Bug  # noqa: E402
 from race import Race, Entrant, CPU, HUMAN, COUNTDOWN, RACING, award_points  # noqa: E402
+from rng import Rng  # noqa: E402
 
 
 def drive_to(kart, x, y):
@@ -47,7 +47,7 @@ class TrackTests(unittest.TestCase):
                 self.assertEqual(g.surface(g.nearest(x, y, i)[2]), ROAD, spec["name"])
             for px, py, _h in g.pads:
                 self.assertEqual(g.surface(g.nearest(px, py, g.nearest_global(px, py))[2]), ROAD)
-            items = Items(g, random.Random(1))
+            items = Items(g, Rng(1))
             for b in items.boxes:
                 lat = g.nearest(b.x, b.y, g.nearest_global(b.x, b.y))[2]
                 self.assertEqual(g.surface(lat), ROAD, spec["name"])
@@ -64,13 +64,13 @@ class FairnessTests(unittest.TestCase):
         self.assertEqual(totals, {12})
 
     def test_leader_never_gets_attack_or_comeback_items(self):
-        rng = random.Random(3)
+        rng = Rng(3)
         got = {roll(0, rng) for _ in range(2000)}
         self.assertNotIn(PUSH, got)
         self.assertNotIn(DUCK, got)
 
     def test_force_push_only_for_last_place(self):
-        rng = random.Random(4)
+        rng = Rng(4)
         for rank in (0, 1, 2):
             self.assertNotIn(PUSH, {roll(rank, rng) for _ in range(2000)})
         self.assertIn(PUSH, {roll(3, rng) for _ in range(2000)})
@@ -188,7 +188,7 @@ class LapTests(unittest.TestCase):
 class ItemTests(unittest.TestCase):
     def test_bug_spins_others_but_not_its_owner_at_first(self):
         g = Geometry(TRACKS[0])
-        items = Items(g, random.Random(1))
+        items = Items(g, Rng(1))
         a = Kart(0, 0, CHARACTERS[0]["stats"], g, 0)
         b = Kart(1, 1, CHARACTERS[1]["stats"], g, 1)
         items.bugs.append(Bug(a.x, a.y, a.id))
@@ -202,7 +202,7 @@ class ItemTests(unittest.TestCase):
 
     def test_force_push_hits_only_karts_ahead(self):
         g = Geometry(TRACKS[0])
-        items = Items(g, random.Random(1))
+        items = Items(g, Rng(1))
         karts = [Kart(i, i, CHARACTERS[i]["stats"], g, i) for i in range(4)]
         karts[3].item = PUSH
         ranks = {0: 0, 1: 1, 2: 2, 3: 3}
