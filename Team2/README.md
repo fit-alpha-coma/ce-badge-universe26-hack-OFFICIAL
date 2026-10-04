@@ -60,10 +60,13 @@ Settings > Unlock all racers (demo) opens the whole roster for a booth.
 The open-source mascots are original pixel art based on: Tux by Larry Ewing
 (made with The GIMP; use and modification permitted with acknowledgement),
 Ferris the Rustacean by Karen Rustad Tolva (CC0), the Go gopher by Renee
-French (CC BY 4.0), Duke (open-sourced by Sun under the BSD licence), and the
-Android robot, which is reproduced or modified from work created and shared by
-Google and used according to terms described in the Creative Commons 3.0
-Attribution License. Credits also appear in Settings > Credits. Git has no
+French (CC BY 4.0, https://creativecommons.org/licenses/by/4.0/) and Duke
+(open-sourced by Sun under the New BSD license). The Android robot is
+reproduced or modified from work created and shared by Google and used
+according to terms described in the Creative Commons 3.0 Attribution License
+(https://creativecommons.org/licenses/by/3.0/). Every racer above is redrawn
+as pixel art. Full notices with sources: `super_mona_kart/NOTICES.txt`, also
+summarised in Settings > Credits. Git has no
 mascot character, and GitHub's other Octodex characters are left out because
 their terms restrict use.
 

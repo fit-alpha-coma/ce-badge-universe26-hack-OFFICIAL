@@ -41,7 +41,8 @@ class Party:
         self.state = CONNECT
         self.t0 = game.now
         self.id = random.getrandbits(16) | 1
-        self.char = game.char
+        free = unlocked(game.save)
+        self.char = game.char if game.char in free else free[0]
         self.track = 0
         self.peers = {}          # net id -> {"c", "tr", "seen", "off"}
         self.net = None

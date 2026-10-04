@@ -53,6 +53,11 @@ class Game:
                 self.save[k] = copy(v)
         self.fresh = []                      # racers unlocked by the last result
         self.cup_rivals = []
+        # older saves: a trophy proves a finished cup; grant anything already earned
+        if self.save["cups"] and not self.save["cup_done"]:
+            self.save["cup_done"] = True
+        if newly_unlocked(self.save):
+            self.persist()
         self.lights = Lights(self.save["lights"])
         self.controls = Controls()
         self.controls.tilt = self.save["tilt"]
@@ -248,7 +253,9 @@ class Game:
         text("from " + ch["app"], 132, 124, a.small, ui.DIM, shadow=False)
         if locked:
             text("Locked", 132, 140, a.small, color.rgb(255, 160, 140), shadow=False)
-            text(UNLOCK_HINTS.get(ch.get("unlock"), ""), 132, 154, a.small, ui.ACCENT, shadow=False)
+            screen.font = a.small
+            screen.pen = ui.ACCENT
+            screen.text(UNLOCK_HINTS.get(ch.get("unlock"), ""), rect(132, 154, W - 32 - 120, 40))
         else:
             text(ch["blurb"], 132, 136, a.small, ui.ACCENT, shadow=False)
             ui.stat_bars(ch["stats"], 132, 154, a.small)
@@ -260,23 +267,40 @@ class Game:
             self.cursor = (self.cursor + 1) % n
         if back(BUTTON_UP):
             self.go(MENU, self.mode)
-        elif badge.pressed(BUTTON_SELECT) and not locked:
-            self.char = self.cursor
+        elif badge.pressed(BUTTON_SELECT) and self.cursor in free:
+            self.char = self.cursor             # checked after this frame's moves
             if self.mode == GP:
                 self.go(DIFF, self.difficulty)
             else:
                 self.go(TRACKSEL, self.track)
 
     def credits(self):
+        """Wrapped, paged credits: every line fits on the 320 px screen."""
         self.backdrop()
         a = self.art
         ui.heading("Credits", 8, a, 22)
-        panel(10, 40, W - 20, 170)
-        for i, line in enumerate(CREDITS):
-            text(line, 18, 48 + i * 17, a.small, ui.WHITE if i == 0 else ui.DIM, shadow=False)
-        prompt([("BK/<", "back"), ("SEL", "back")], H - 18, a.small)
-        if back(BUTTON_LEFT) or badge.pressed(BUTTON_SELECT):
+        panel(10, 40, W - 20, 172)
+        screen.font = a.small
+        y = 46
+        i = self.cursor
+        while i < len(CREDITS):
+            box = rect(18, y, W - 36, 212 - y)
+            _w, h = screen.measure_text(CREDITS[i], box)
+            if y + h > 208 and i > self.cursor:
+                break
+            screen.pen = ui.WHITE if i == 0 else ui.DIM
+            screen.text(CREDITS[i], box)
+            y += h + 6
+            i += 1
+        more = i < len(CREDITS)
+        prompt([("SEL", "more" if more else "back"), ("BK/<", "back")], H - 18, a.small)
+        if back(BUTTON_LEFT):
             self.go(SETTINGS)
+        elif badge.pressed(BUTTON_SELECT):
+            if more:
+                self.cursor = i
+            else:
+                self.go(SETTINGS)
 
     def diff(self):
         self.backdrop()
@@ -302,6 +326,7 @@ class Game:
             self.cup_race = 0
             self.totals = {}
             self.last_order = []
+            self.cup_rivals = pick_rivals(self.char, unlocked(self.save), self.rng)
             self.start_race(0)
 
     def tracksel(self):
@@ -355,7 +380,7 @@ class Game:
             self.ghost, self.ghost_char = g if g else (None, 0)
         else:
             if self.mode == GP:
-                if self.cup_race == 0 or not self.cup_rivals:
+                if not self.cup_rivals:
                     self.cup_rivals = pick_rivals(self.char, unlocked(self.save), self.rng)
                 rivals = self.cup_rivals      # the same three for the whole cup
             else:
@@ -725,18 +750,18 @@ class Game:
         rows = (("Case lights", "lights"), ("Steering assist", "assist"),
                 ("Tilt steering", "tilt"), ("Fast graphics", "fast"), ("Show frame rate", "fps"))
         for i, (name, key) in enumerate(rows):
-            y = 46 + i * 28
+            y = 40 + i * 22
             sel = i == self.cursor
-            panel(50, y, W - 100, 25, color.rgb(60, 90, 200, 210) if sel else None)
-            ui.label(name, 62, y + 4, a, 14, ui.WHITE if sel else ui.DIM)
-            ui.label("On" if self.save[key] else "Off", W - 92, y + 4, a, 14, ui.ACCENT if self.save[key] else ui.DIM)
+            panel(50, y, W - 100, 20, color.rgb(60, 90, 200, 210) if sel else None)
+            ui.label(name, 62, y + 2, a, 13, ui.WHITE if sel else ui.DIM)
+            ui.label("On" if self.save[key] else "Off", W - 92, y + 2, a, 13, ui.ACCENT if self.save[key] else ui.DIM)
         actions = ("Credits", "Unlock all racers (demo)", "Clear records")
         for j, name in enumerate(actions):
-            y = 46 + (len(rows) + j) * 28
+            y = 40 + (len(rows) + j) * 22      # last row ends at 214, above the prompts
             sel = self.cursor == len(rows) + j
             hot = color.rgb(160, 60, 60, 210) if j == 2 else color.rgb(60, 90, 200, 210)
-            panel(50, y, W - 100, 25, hot if sel else None)
-            ui.label(name, 62, y + 4, a, 14, ui.WHITE if sel else ui.DIM)
+            panel(50, y, W - 100, 20, hot if sel else None)
+            ui.label(name, 62, y + 2, a, 13, ui.WHITE if sel else ui.DIM)
         prompt([("^v", "move"), ("SEL", "change"), ("BK/<", "back")], H - 18, a.small)
         self.cursor = (self.cursor + menu_move()) % (len(rows) + len(actions))
         if back(BUTTON_LEFT):
@@ -764,6 +789,8 @@ class Game:
                 self.save["hard"] = False
                 self.save["unlocked"] = []
                 self.save["cup_done"] = False
+                if self.char not in unlocked(self.save):
+                    self.char = 0
                 for tr in TRACKS:
                     State.delete("smk_ghost_" + tr["key"])
                 self.banner("Records cleared", 900)

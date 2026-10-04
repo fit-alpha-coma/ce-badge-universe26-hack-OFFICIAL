@@ -41,14 +41,13 @@ UNLOCK_HINTS = {
 # Attribution required (or courteous) for the open-source mascots.
 CREDITS = (
     "Mona, Cluck, Sciuri and Buzz: the GitHub Universe badge apps.",
-    "Tux: based on the Linux mascot by Larry Ewing, made with The GIMP.",
-    "Ferris: based on Ferris the Rustacean by Karen Rustad Tolva (CC0).",
-    "Gopher: the Go gopher was designed by Renee French (CC BY 4.0).",
-    "Duke: the Java mascot, open-sourced by Sun under the BSD licence.",
-    "The Android robot is reproduced or modified from work created and",
-    "shared by Google and used according to terms described in the",
-    "Creative Commons 3.0 Attribution License.",
-    "Mascots appear as tributes; no endorsement is implied.",
+    "Tux: based on the Linux mascot by Larry Ewing (lewing@isc.tamu.edu), made with The GIMP. Redrawn.",
+    "Ferris: based on Ferris the Rustacean by Karen Rustad Tolva, CC0. Redrawn.",
+    "Gopher: the Go gopher was designed by Renee French, CC BY 4.0. Redrawn as pixel art.",
+    "Duke: the Java mascot, open-sourced by Sun under the New BSD license. Redrawn.",
+    "The Android robot is reproduced or modified from work created and shared by Google and "
+    "used according to terms described in the Creative Commons 3.0 Attribution License.",
+    "Mascots appear as tributes; no endorsement is implied. Full notices: NOTICES.txt.",
 )
 
 # Tracks of the Octo Cup, in race order.

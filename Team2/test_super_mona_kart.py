@@ -75,8 +75,17 @@ class FairnessTests(unittest.TestCase):
             self.assertTrue((assets / ("kart_%s.png" % c["key"])).is_file(), c["key"])
             self.assertTrue((assets / ("kart_%s_half.png" % c["key"])).is_file(), c["key"])
         credits = " ".join(config.CREDITS)
-        for name in ("Larry Ewing", "Renee French", "BSD", "Creative Commons 3.0 Attribution"):
+        for name in ("Larry Ewing", "The GIMP", "Renee French", "New BSD", "CC0"):
             self.assertIn(name, credits)
+        google = ("The Android robot is reproduced or modified from work created and shared by "
+                  "Google and used according to terms described in the Creative Commons 3.0 "
+                  "Attribution License.")
+        self.assertIn(google, credits)
+        notices = (assets.parent / "NOTICES.txt").read_text()
+        self.assertIn(" ".join(google.split()), " ".join(notices.split()))
+        for url in ("creativecommons.org/licenses/by/4.0", "creativecommons.org/licenses/by/3.0",
+                    "wiki.openjdk.org/display/duke"):
+            self.assertIn(url, notices)
 
     def test_leader_never_gets_attack_or_comeback_items(self):
         rng = Rng(3)
@@ -121,6 +130,25 @@ class RosterTests(unittest.TestCase):
                 self.assertEqual(len(set(r)), 3)
                 self.assertNotIn(player, r)
                 self.assertTrue(set(r) <= set(pool))
+
+    def test_old_saves_get_earned_unlocks(self):
+        from progress import newly_unlocked
+        save = {"unlocked": [], "cups": {"0": 1, "1": 1}, "tt_best": {}, "cup_done": True}
+        got = newly_unlocked(save)
+        self.assertEqual(sorted(got), ["Duke", "Ferris", "Gopher"])
+
+    def test_tux_grip_trait_does_nothing_on_grass(self):
+        keys = [c["key"] for c in CHARACTERS]
+        meadow = Geometry(TRACKS[0])
+        out = []
+        for trait in (None, "ice"):
+            k = Kart(0, keys.index("tux"), CHARACTERS[keys.index("tux")]["stats"], meadow, 0, trait)
+            k.surface = 2
+            h = k.heading
+            k.vx, k.vy = math.cos(h) * 40 - math.sin(h) * 20, math.sin(h) * 40 + math.cos(h) * 20
+            k.drive(0.1, 0, False, False)
+            out.append((k.vx, k.vy))
+        self.assertEqual(out[0], out[1])
 
     def test_traits_help_only_on_their_surface(self):
         keys = [c["key"] for c in CHARACTERS]

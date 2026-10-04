@@ -148,8 +148,8 @@ class Kart:
         on_ice = geo.on_patch(self.x, self.y)
         if on_ice:
             grip *= 0.45
-        if self.trait == "ice" and (on_ice or grip < 1.0):
-            grip = min(1.0, grip * 1.35)
+        if self.trait == "ice" and (on_ice or geo.spec.get("grip", 1.0) < 1.0):
+            grip = min(1.0, grip * 1.35)      # ice patches and icy tracks only
         if self.boost > 0:
             top *= BOOST_TOP
 

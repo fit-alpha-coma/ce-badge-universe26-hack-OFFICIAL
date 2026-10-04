@@ -1,0 +1,43 @@
+Super Mona Kart: third-party characters
+========================================
+
+The racers below are original pixel art drawn for this game (Team2/make_assets.py),
+based on open-source mascots. They are adaptations ("modified"), not copies of
+the original image files. The mascots appear as tributes; no endorsement by any
+project or company is implied, and none of the projects' logos are used.
+
+Mona, Cluck, Sciuri, Buzz
+  Characters of the GitHub Universe badge apps (Flappy, Plucky Cluck, Snarky
+  Sciuridae, Bee Amazed). Side and front views reuse those apps' sprites from
+  this repository.
+
+Tux (Linux)
+  Based on Tux by Larry Ewing (lewing@isc.tamu.edu), drawn with The GIMP.
+  Terms: "Permission to use and/or modify this image is granted provided you
+  acknowledge me lewing@isc.tamu.edu and The GIMP if someone asks."
+  Source: https://en.wikipedia.org/wiki/Tux_(mascot)
+
+Ferris (Rust)
+  Based on Ferris the Rustacean by Karen Rustad Tolva, dedicated to the public
+  domain under CC0 1.0. No attribution is required; it is given as a courtesy.
+  Source: https://rustacean.net/
+
+Gopher (Go)
+  The Go gopher was designed by Renee French. The design is licensed under the
+  Creative Commons Attribution 4.0 License. Modified: redrawn as pixel art.
+  Source: https://go.dev/doc/gopher/README
+  License: https://creativecommons.org/licenses/by/4.0/
+
+Duke (Java)
+  Duke, the Java mascot, was open-sourced by Sun Microsystems on 13 November
+  2006 under the New BSD license. This game's Duke is an original redrawing,
+  not the project's image files. Modified: redrawn as pixel art.
+  Source and license: https://wiki.openjdk.org/display/duke/Main
+  License template: https://opensource.org/license/bsd-3-clause
+
+Android robot
+  The Android robot is reproduced or modified from work created and shared by
+  Google and used according to terms described in the Creative Commons 3.0
+  Attribution License. Modified: redrawn as pixel art.
+  Source: https://developer.android.com/distribute/marketing-tools/brand-guidelines
+  License: https://creativecommons.org/licenses/by/3.0/

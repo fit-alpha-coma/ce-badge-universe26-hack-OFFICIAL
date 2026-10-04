@@ -196,6 +196,20 @@ correctly on a reproduced crash. New findings, all fixed with tests:
 | 8 | Medium | Steering eased once per frame, slower on slow badges | Steering updates every substep; one press fires one item |
 | 9 | Medium | Frames over 200 ms lost driving time against the shared clock | Up to 500 ms of backlog per frame, each substep with its own clock boundary |
 
+### Round 3: Codex (gpt-6.1-sol, medium), roster change, 9 findings
+
+| # | Sev | Finding | Fix |
+| --- | --- | --- | --- |
+| 1 | High | Mascot notices lacked licence links, modification notes and Google's exact sentence in the README | `super_mona_kart/NOTICES.txt` ships with the app (sources, licence URLs, "redrawn"); README quotes Google verbatim; a test checks it |
+| 2 | Medium | Settings ran past the screen; Clear records was invisible | Tighter rows end at y=214 |
+| 3 | Medium | Right + Select in one frame picked a locked racer | The lock is checked after the frame's moves |
+| 4 | Medium | Clear records left a now-locked racer selected, also in Party | The pick falls back to an unlocked racer |
+| 5 | Medium | Old saves did not get unlocks they had earned | Trophies imply a finished cup; unlocks reconcile at start |
+| 6 | Medium | Credits clipped the attributions | Credits wrap and page |
+| 7 | Low | Tux's ice trait also helped on grass and sand | Only on ice patches and icy tracks; test added |
+| 8 | Low | The Android robot's hint was cut off | Hints wrap |
+| 9 | Low | Restarting race one re-rolled the cup's rivals | Rivals are chosen when the cup starts |
+
 Two automated security reviews of the party code:
 
 - Malformed packets could raise and reset the badge. Fixed: every field is
