@@ -339,6 +339,7 @@ class Party:
         self.seen = {pid: g.now for pid in ids}
         self.next_state = 0
         self.state = RACING_S
+        print("party: race %d on %s, %d badges" % (self.race_id, TRACKS[self.track]["key"], len(ids)))
         g.start_party_race(self.track)
 
     def clock(self):

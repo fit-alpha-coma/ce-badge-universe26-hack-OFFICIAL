@@ -135,11 +135,13 @@ Tests, in the order they run:
 
 **Emulation.** The badge firmware is a derivative of `pimoroni/tufty2350`
 (commit `ee84772`), which pins PicoVector v3.1.0 and MicroPython
-`bw-1.29.0-gc`. Our simulator branch (`pv3-runtime` of
-`pimoroni/badgeware-simulator`) links PicoVector v3.1.0 and boots that
-firmware's own `badgeware` Python runtime, patched in three asserted places.
-Only drivers are stubbed. Unmodified 2026 apps (Plucky Cluck, Tennis, the
-demos) run in it. Known gaps: MicroPython 1.26 instead of 1.29, no
+`bw-1.29.0-gc`. `Team2/setup_simulator.sh` builds a simulator from pinned
+commits of `pimoroni/badgeware-simulator` plus `Team2/badgesim.patch`: it
+links PicoVector v3.1.0 and boots that firmware's own `badgeware` Python
+runtime, patched in three asserted places. Only drivers are stubbed.
+Unmodified 2026 apps (Plucky Cluck, Tennis, the demos) run in it (step 4 of
+`Team2/run_checks.sh`). Known gaps: upstream MicroPython v1.28.0 instead of
+Pimoroni's bw-1.29.0-gc, no
 `@micropython.native` or `viper` (the game uses neither), and GitHub's own
 2026 input layer is emulated from its documentation because its source is not
 public.

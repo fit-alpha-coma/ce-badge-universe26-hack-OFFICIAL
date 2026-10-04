@@ -1,0 +1,751 @@
+diff --git a/micropython/CMakeLists.txt b/micropython/CMakeLists.txt
+index 45ea5f8..ae1186a 100644
+--- a/micropython/CMakeLists.txt
++++ b/micropython/CMakeLists.txt
+@@ -11,7 +11,7 @@ if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+ endif()
+ 
+ set(CMAKE_OSX_DEPLOYMENT_TARGET 14)
+-set(USER_C_MODULES "../src/micropython.cmake")
++set(USER_C_MODULES "usermods_pv3.cmake")
+ 
+ get_filename_component(LIB_DIR "${CMAKE_CURRENT_LIST_DIR}/../lib/" ABSOLUTE)
+ get_filename_component(USER_C_MODULES ${USER_C_MODULES} ABSOLUTE)
+@@ -78,6 +78,8 @@ include(${MICROPY_DIR}/py/usermod.cmake)
+ add_executable(${MICROPY_TARGET})
+ 
+ target_link_libraries(${MICROPY_TARGET} micropy_lib_mbedtls)
++# PicoVector v3.1.0 is warning-clean on arm-none-eabi-g++, not on clang
++target_compile_options(${MICROPY_TARGET} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wno-error>)
+ 
+ if(HEADLESS)
+     target_compile_definitions(${MICROPY_TARGET} PRIVATE "HEADLESS=1")
+@@ -196,7 +198,6 @@ target_include_directories(${MICROPY_TARGET} PRIVATE
+ 
+ # Need these to make the QSTR parser happy
+ list(APPEND MICROPY_CPP_FLAGS
+-    "-I/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include"
+     "-I${MICROPY_DIR}/lib/mbedtls/include"
+     "-I${MICROPY_DIR}"
+     "-I${MICROPY_VARIANT_DIR}"
+@@ -204,6 +205,9 @@ list(APPEND MICROPY_CPP_FLAGS
+     "-I${CMAKE_BINARY_DIR}"
+     "-DFFCONF_H=\"${MICROPY_DIR}/lib/oofatfs/ffconf.h\""
+ )
++foreach(dir ${MICROPY_INC_USERMOD})
++    list(APPEND MICROPY_CPP_FLAGS "-I${dir}")
++endforeach()
+ 
+ target_compile_options(${MICROPY_TARGET} PRIVATE
+     -Wall
+@@ -218,6 +222,8 @@ target_compile_options(${MICROPY_TARGET} PRIVATE $<$<COMPILE_LANGUAGE:C>:
+ >)
+ 
+ target_compile_options(${MICROPY_TARGET} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:
++    -Wno-error
++    -Wno-unknown-pragmas
+     -fno-exceptions
+     -fno-unwind-tables
+     -fno-rtti
+diff --git a/micropython/alloc.c b/micropython/alloc.c
+index 9ab2ca0..720072f 100644
+--- a/micropython/alloc.c
++++ b/micropython/alloc.c
+@@ -81,3 +81,10 @@ void mp_unix_free_exec(void *ptr, size_t size) {
+ MP_REGISTER_ROOT_POINTER(void *mmap_region_head);
+ 
+ #endif // MICROPY_EMIT_NATIVE
++
++#include "py/misc.h"
++
++// See mpconfigport.h: no-scan allocation falls back to a scanned block.
++void *m_malloc_no_scan(size_t num_bytes) {
++    return m_malloc(num_bytes);
++}
+diff --git a/micropython/main.c b/micropython/main.c
+index e7e9428..8bf22d1 100644
+--- a/micropython/main.c
++++ b/micropython/main.c
+@@ -224,6 +224,19 @@ static void sokol_frame(void) {
+     if (igBegin("Badgeware Output", 0, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoResize)) {
+         ImTextureID texid0 = simgui_imtextureid_with_sampler(state.badgeware.view, state.smp.nearest_clamp);
+         igImageEx(imtexref(texid0), state.badgeware.render_size, uv0, uv1);
++        // Case lights CL0..CL3 as glowing corners (brightness = PWM duty)
++        extern float simulator_caselights[4];
++        ImDrawList *dl = igGetWindowDrawList();
++        float cw = state.badgeware.render_size.x, ch = state.badgeware.render_size.y, sz = cw / 16.0f;
++        ImVec2 corners[4] = {{0, 0}, {cw - sz, 0}, {0, ch - sz}, {cw - sz, ch - sz}};
++        for(int i = 0; i < 4; i++) {
++            float v = simulator_caselights[i];
++            if(v <= 0.0f) continue;
++            if(v > 1.0f) v = 1.0f;
++            unsigned int a = (unsigned int)(v * 230.0f);
++            ImU32 col = (a << 24) | (0xF0u << 16) | (0xF8u << 8) | 0xFFu;
++            ImDrawList_AddRectFilledEx(dl, corners[i], (ImVec2){corners[i].x + sz, corners[i].y + sz}, col, sz / 3.0f, 0);
++        }
+     }
+     igEnd();
+     igPopStyleVar(); // ImGuiStyleVar_WindowPadding
+@@ -270,24 +283,41 @@ static void sokol_event(const sapp_event* ev) {
+     if(ev->type == SAPP_EVENTTYPE_KEY_DOWN || ev->type == SAPP_EVENTTYPE_KEY_UP) {
+         bool keydown = ev->type == SAPP_EVENTTYPE_KEY_DOWN;
+         uint8_t mask = 0;
++        // Universe 2026 badge: bit 0x10/0x08/0x04 are the physical A/B/C
++        // switches, which the bottom row labels Left, Right and Select. 0x40
++        // and 0x80 are the touch-only Back and Menu pads.
+         switch (ev->key_code) {
+             case SAPP_KEYCODE_H: // Home
+-                mask = 0b100000;
++                mask = 0b00100000;
+                 break;
+-            case SAPP_KEYCODE_LEFT: // A
+-                mask = 0b010000;
++            case SAPP_KEYCODE_LEFT: // A = Left
++            case SAPP_KEYCODE_A:
++                mask = 0b00010000;
+                 break;
+-            case SAPP_KEYCODE_SPACE: // B
+-                mask = 0b001000;
++            case SAPP_KEYCODE_RIGHT: // B = Right
++            case SAPP_KEYCODE_D:
++                mask = 0b00001000;
+                 break;
+-            case SAPP_KEYCODE_RIGHT: // C
+-                mask = 0b000100;
++            case SAPP_KEYCODE_SPACE: // C = Select
++            case SAPP_KEYCODE_ENTER:
++            case SAPP_KEYCODE_X:
++                mask = 0b00000100;
+                 break;
+             case SAPP_KEYCODE_UP: // Up
+-                mask = 0b000010;
++            case SAPP_KEYCODE_W:
++                mask = 0b00000010;
+                 break;
+             case SAPP_KEYCODE_DOWN: // Down
+-                mask = 0b000001;
++            case SAPP_KEYCODE_S:
++                mask = 0b00000001;
++                break;
++            case SAPP_KEYCODE_BACKSPACE: // Back (touch pad)
++            case SAPP_KEYCODE_Z:
++                mask = 0b01000000;
++                break;
++            case SAPP_KEYCODE_M: // Menu (touch pad)
++            case SAPP_KEYCODE_TAB:
++                mask = 0b10000000;
+                 break;
+             case SAPP_KEYCODE_ESCAPE: // Home
+                 if(keydown) {
+diff --git a/micropython/modsimulator.c b/micropython/modsimulator.c
+index 0d0e108..39e0bf2 100644
+--- a/micropython/modsimulator.c
++++ b/micropython/modsimulator.c
+@@ -19,6 +19,11 @@ int screen_width = 160;
+ int screen_height = 120;
+ uint32_t framebuffer[320 * 240];
+ 
++// Case light duty (0..1) per LED, drawn by the windowed front end.
++float simulator_caselights[4] = {0, 0, 0, 0};
++extern uint8_t picovector_buttons;
++extern double picovector_ticks;
++
+ int debug_width = 300;
+ int debug_height = 360;
+ uint32_t debug_buffer[300 * 360];
+@@ -108,6 +113,14 @@ void modsimulator_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
+             if(action == GET) {
+                 dest[0] = mp_obj_new_bool(is_hot_reload);
+             } break;
++        case MP_QSTR_buttons:
++            if(action == GET) {
++                dest[0] = mp_obj_new_int(picovector_buttons);
++            } break;
++        case MP_QSTR_ticks:
++            if(action == GET) {
++                dest[0] = mp_obj_new_int_from_ll((long long)picovector_ticks);
++            } break;
+         case MP_QSTR_headless:
+             if(action == GET) {
+                 dest[0] = mp_obj_new_bool(is_headless);
+@@ -117,7 +130,16 @@ void modsimulator_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
+ }
+ 
+ 
++mp_obj_t modsimulator_caselights(size_t n_args, const mp_obj_t *args) {
++    for(size_t i = 0; i < 4 && i < n_args; i++) {
++        simulator_caselights[i] = mp_obj_get_float(args[i]);
++    }
++    return mp_const_none;
++}
++static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(modsimulator_caselights_obj, 4, 4, modsimulator_caselights);
++
+ static const mp_rom_map_elem_t modsimulator_globals_table[] = {
++    { MP_ROM_QSTR(MP_QSTR_caselights), MP_ROM_PTR(&modsimulator_caselights_obj) },
+     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_modsimulator) },
+     { MP_ROM_QSTR(MP_QSTR_screenshot), MP_ROM_PTR(&modsimulator_screenshot_obj) },
+     { MP_ROM_QSTR(MP_QSTR_realtime), MP_ROM_PTR(&modsimulator_realtime_obj) },
+diff --git a/micropython/mpconfigport.h b/micropython/mpconfigport.h
+index 089e478..afc3035 100644
+--- a/micropython/mpconfigport.h
++++ b/micropython/mpconfigport.h
+@@ -235,3 +235,14 @@ static inline unsigned long mp_random_seed_init(void) {
+ #ifndef MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
+ #define MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS (MICROPY_BLUETOOTH_NIMBLE)
+ #endif
++
++// PicoVector v3.1.0 targets MicroPython 1.29 (pimoroni bw-1.29.0-gc), which
++// has a no-scan allocator. Upstream 1.28.0 does not; alloc.c maps it onto m_malloc.
++#include <stddef.h>
++#ifdef __cplusplus
++extern "C" {
++#endif
++void *m_malloc_no_scan(size_t num_bytes);
++#ifdef __cplusplus
++}
++#endif
+diff --git a/micropython/usermods_pv3.cmake b/micropython/usermods_pv3.cmake
+new file mode 100644
+index 0000000..a06ec9e
+--- /dev/null
++++ b/micropython/usermods_pv3.cmake
+@@ -0,0 +1,6 @@
++# Build the simulator against the same PicoVector the badge firmware pins
++# (pimoroni/tufty2350 ci/micropython.sh: PIMORONI_PICOVECTOR_VERSION=v3.1.0).
++get_filename_component(PV_MP_DIR "${CMAKE_CURRENT_LIST_DIR}/../lib/picovector-micropython" ABSOLUTE)
++set(PICOVECTOR_DIR "${PV_MP_DIR}/picovector")
++set(PV_HARDWARE_INTERP OFF CACHE BOOL "" FORCE)
++include(${PV_MP_DIR}/picovector_micropython.cmake)
+diff --git a/runtime2026/badge2026.py b/runtime2026/badge2026.py
+new file mode 100644
+index 0000000..27c2aaa
+--- /dev/null
++++ b/runtime2026/badge2026.py
+@@ -0,0 +1,60 @@
++# GitHub Universe 2026 additions on top of the Tufty 2350 runtime.
++#
++# Source of truth for this surface: badger/home hardware/README.md and
++# badge/AGENTS.md (logical actions, touched/direction/imu/upside_down) and the
++# 2026 apps that call it. The GitHub firmware's implementation is not public,
++# so these are emulations of the documented behaviour:
++#
++# - LEFT/RIGHT/SELECT are the physical A/B/C switches, which the 2026 layout
++#   puts left to right on the bottom row. The touch D-pad and pads report the
++#   same logical actions, so one key per action stands in for both sources.
++# - BACK and MENU exist only on the touch face.
++# - imu() returns raw LSM6DS3 counts (about 16384 per g at the default range),
++#   matching the firmware's lsm6ds3 driver. `tilt` simulates a tilted badge.
++
++import builtins
++import math
++import machine
++import _input
++
++_b = machine.Pin.board
++builtins.BUTTON_LEFT = _b.BUTTON_A
++builtins.BUTTON_RIGHT = _b.BUTTON_B
++builtins.BUTTON_SELECT = _b.BUTTON_C
++builtins.BUTTON_BACK = _input.TOUCH_BACK
++builtins.BUTTON_MENU = _input.TOUCH_MENU
++
++COUNTS_PER_G = 16384
++tilt = [0.0, 0.0]  # (x, y) in g, set by the harness
++
++
++def _touched(self, button=None):
++    if button is None:
++        return _input.held
++    return button in _input.held
++
++
++def _direction(self):
++    held = _input.held
++    x = (BUTTON_RIGHT in held) - (BUTTON_LEFT in held)
++    y = (BUTTON_DOWN in held) - (BUTTON_UP in held)
++    if x and y:
++        return vec2(x * 0.70710678, y * 0.70710678)
++    return vec2(x, y)
++
++
++def _imu(self):
++    gx, gy = tilt
++    gz = math.sqrt(max(0.0, 1.0 - gx * gx - gy * gy))
++    return (int(gx * COUNTS_PER_G), int(gy * COUNTS_PER_G), int(gz * COUNTS_PER_G), 0, 0, 0)
++
++
++def _upside_down(self):
++    return False
++
++
++cls = type(badge)
++cls.touched = _touched
++cls.direction = _direction
++cls.imu = _imu
++cls.upside_down = _upside_down
+diff --git a/runtime2026/stubs/_input.py b/runtime2026/stubs/_input.py
+new file mode 100644
+index 0000000..da2c0a5
+--- /dev/null
++++ b/runtime2026/stubs/_input.py
+@@ -0,0 +1,68 @@
++# Python stand-in for the firmware's _input C module
++# (pimoroni/tufty2350 modules/c/input/input.cpp).
++#
++# Same contract: poll() latches the switch state and the millisecond clock once
++# per frame; held/pressed/released/changed are tuples of the Pin objects in
++# machine.Pin.board, so `BUTTON_A in badge.pressed()` works by identity.
++# The Universe 2026 badge adds the touch-only Back and Menu pads, which have no
++# Pin; they appear here as TOUCH_BACK and TOUCH_MENU.
++
++import machine
++import simulator
++
++
++class _TouchPad:
++    def __init__(self, name):
++        self.name = name
++
++    def __repr__(self):
++        return "TouchPad(%s)" % self.name
++
++
++TOUCH_BACK = _TouchPad("BACK")
++TOUCH_MENU = _TouchPad("MENU")
++
++_b = machine.Pin.board
++_MAP = (
++    (0x20, _b.BUTTON_HOME),
++    (0x10, _b.BUTTON_A),
++    (0x08, _b.BUTTON_B),
++    (0x04, _b.BUTTON_C),
++    (0x02, _b.BUTTON_UP),
++    (0x01, _b.BUTTON_DOWN),
++    (0x40, TOUCH_BACK),
++    (0x80, TOUCH_MENU),
++)
++
++held = ()
++pressed = ()
++released = ()
++changed = ()
++ticks = 0
++ticks_delta = 0
++
++# Scripted input for headless runs: a callable returning extra mask bits.
++script = None
++
++_buttons = 0
++_last_ticks = 0
++
++
++def _items(mask):
++    return tuple(obj for bit, obj in _MAP if mask & bit)
++
++
++def poll():
++    global held, pressed, released, changed, ticks, ticks_delta, _buttons, _last_ticks
++    b = simulator.buttons
++    if script is not None:
++        b |= script()
++    ch = b ^ _buttons
++    _buttons = b
++    held = _items(b)
++    pressed = _items(b & ch)
++    released = _items(~b & ch & 0xFF)
++    changed = _items(ch)
++    _last_ticks = ticks
++    ticks = simulator.ticks
++    ticks_delta = ticks - _last_ticks
+diff --git a/runtime2026/stubs/machine.py b/runtime2026/stubs/machine.py
+new file mode 100644
+index 0000000..92a1c5e
+--- /dev/null
++++ b/runtime2026/stubs/machine.py
+@@ -0,0 +1,115 @@
++# machine stub for the Universe 2026 badge.
++#
++# Pin names follow pimoroni/tufty2350 board/pins.csv and the 2026 schematic.
++# Switch pins read the simulator's button mask, active low like the real
++# pull-ups, so `Pin.board.BUTTON_A.value() == 0` while it is pressed. PWM on the
++# CL0..CL3 case-light pins is forwarded to the window.
++
++import simulator
++
++# simulator.buttons bits (see micropython/main.c)
++_SWITCH_BITS = {
++    "BUTTON_HOME": 0x20,
++    "BUTTON_A": 0x10,
++    "BUTTON_B": 0x08,
++    "BUTTON_C": 0x04,
++    "BUTTON_UP": 0x02,
++    "BUTTON_DOWN": 0x01,
++}
++_CASE_LIGHTS = ("CL0", "CL1", "CL2", "CL3")
++_duty = [0.0, 0.0, 0.0, 0.0]
++
++
++class Pin:
++    IN = 0
++    OUT = 1
++    PULL_UP = 1
++    PULL_DOWN = 2
++    IRQ_FALLING = 4
++    IRQ_RISING = 8
++
++    def __init__(self, name, *args, **kwargs):
++        self.name = name
++        self._bit = _SWITCH_BITS.get(name, 0)
++        self._out = 0
++
++    def value(self, v=None):
++        if v is not None:
++            self._out = v
++            return None
++        if self._bit:
++            return 0 if simulator.buttons & self._bit else 1
++        return self._out
++
++    def irq(self, *args, **kwargs):
++        return None
++
++    def __repr__(self):
++        return "Pin(%s)" % self.name
++
++
++class _Board:
++    def __init__(self):
++        for name in tuple(_SWITCH_BITS) + _CASE_LIGHTS + (
++            "VBAT_SENSE", "SENSE_1V1", "VBUS_DETECT", "CHARGE_STAT", "LIGHT_SENSE",
++            "RTC_ALARM", "IR_TX", "IR_RX", "BUTTON_RESET", "BUTTON_INT",
++        ):
++            setattr(self, name, Pin(name))
++
++
++Pin.board = _Board()
++
++
++class ADC:
++    # plausible readings: 3.93 V battery, 1.1 V reference, indoor light
++    _READINGS = {"VBAT_SENSE": 39000, "SENSE_1V1": 21845, "LIGHT_SENSE": 20000}
++
++    def __init__(self, pin):
++        self._name = pin.name if isinstance(pin, Pin) else str(pin)
++
++    def read_u16(self):
++        return self._READINGS.get(self._name, 0)
++
++
++class PWM:
++    def __init__(self, pin, *args, **kwargs):
++        self._index = _CASE_LIGHTS.index(pin.name) if pin.name in _CASE_LIGHTS else None
++
++    def freq(self, f=None):
++        return 500
++
++    def duty_u16(self, duty=None):
++        if duty is None:
++            return 0 if self._index is None else int(_duty[self._index] * 65535)
++        if self._index is not None:
++            _duty[self._index] = duty / 65535
++            simulator.caselights(*_duty)
++        return None
++
++
++class I2C:
++    def __init__(self, *args, **kwargs):
++        pass
++
++
++class RTC:
++    def datetime(self, *args):
++        if args:
++            return None
++        import time
++        t = time.localtime()
++        return (t[0], t[1], t[2], t[6], t[3], t[4], t[5], 0)
++
++
++def unique_id():
++    return b"\x20\x26\xba\xd9\xe5\x00\x00\x01"
++
++
++def reset():
++    import sys
++    print("machine.reset()")
++    sys.exit(255)
++
++
++def freq(*args):
++    return 200_000_000
+diff --git a/runtime2026/stubs/network.py b/runtime2026/stubs/network.py
+new file mode 100644
+index 0000000..7ce9297
+--- /dev/null
++++ b/runtime2026/stubs/network.py
+@@ -0,0 +1,45 @@
++# network stub: the host is already online, so a station "connects" at once
++# and reports the loopback address. Sockets are the unix port's real ones,
++# which lets two simulators on one machine talk over UDP.
++STA_IF = 0
++AP_IF = 1
++STAT_IDLE = 0
++STAT_CONNECTING = 1
++STAT_GOT_IP = 3
++
++
++class WLAN:
++    def __init__(self, interface=STA_IF):
++        self._active = False
++        self._connected = False
++
++    def active(self, on=None):
++        if on is None:
++            return self._active
++        self._active = bool(on)
++        if not on:
++            self._connected = False
++        return None
++
++    def connect(self, ssid=None, key=None, **kwargs):
++        self._connected = self._active
++
++    def disconnect(self):
++        self._connected = False
++
++    def isconnected(self):
++        return self._connected
++
++    def status(self, *args):
++        return STAT_GOT_IP if self._connected else STAT_IDLE
++
++    def ipconfig(self, key):
++        if key == "addr4":
++            return ("127.0.0.1", "255.0.0.0")
++        return [("::1", 0, 0, 0)]
++
++    def ifconfig(self):
++        return ("127.0.0.1", "255.0.0.0", "127.0.0.1", "127.0.0.1")
++
++    def config(self, *args, **kwargs):
++        return "badge-sim"
+diff --git a/runtime2026/stubs/pcf85063a.py b/runtime2026/stubs/pcf85063a.py
+new file mode 100644
+index 0000000..8139622
+--- /dev/null
++++ b/runtime2026/stubs/pcf85063a.py
+@@ -0,0 +1,37 @@
++# RTC chip stub backed by the host clock.
++import time
++
++
++class PCF85063A:
++    def __init__(self, i2c=None):
++        pass
++
++    def datetime(self, dt=None):
++        if dt is not None:
++            return None
++        t = time.localtime()
++        return (t[0], t[1], t[2], t[3], t[4], t[5], t[6])
++
++    def enable_timer_interrupt(self, *a):
++        pass
++
++    def set_timer(self, *a):
++        pass
++
++    def read_timer_flag(self):
++        return False
++
++    def clear_timer_flag(self):
++        pass
++
++    def clear_alarm_flag(self):
++        pass
++
++    def enable_alarm_interrupt(self, *a):
++        pass
++
++    def set_alarm(self, *a):
++        pass
++
++    def unset_alarm(self):
++        pass
+diff --git a/runtime2026/stubs/powman.py b/runtime2026/stubs/powman.py
+new file mode 100644
+index 0000000..d11bb56
+--- /dev/null
++++ b/runtime2026/stubs/powman.py
+@@ -0,0 +1,29 @@
++# powman stub: the simulator always boots as if from a reset.
++WAKE_BUTTON_A = 0
++WAKE_BUTTON_B = 1
++WAKE_BUTTON_C = 2
++WAKE_BUTTON_UP = 3
++WAKE_BUTTON_DOWN = 4
++WAKE_DOUBLETAP = 240
++WAKE_WATCHDOG = 241
++WAKE_UNKNOWN = 255
++
++
++def get_wake_reason():
++    return WAKE_UNKNOWN
++
++
++def get_wake_buttons():
++    return ()
++
++
++def get_user_switches():
++    return 0
++
++
++def sleep():
++    pass
++
++
++def goto_dormant_for(duration):
++    pass
+diff --git a/runtime2026/stubs/st7789.py b/runtime2026/stubs/st7789.py
+new file mode 100644
+index 0000000..ca36703
+--- /dev/null
++++ b/runtime2026/stubs/st7789.py
+@@ -0,0 +1,33 @@
++# Display stub: the simulator renders `simulator.framebuffer` after every frame,
++# so update() has nothing to push. fullres() switches between the 160x120
++# pixel-doubled mode and the 320x240 HIRES mode, as display.fullres() does.
++
++import simulator
++
++
++class ST7789:
++    def __init__(self):
++        self.WIDTH = 160
++        self.HEIGHT = 120
++        self.buffer = simulator.framebuffer
++        self._backlight = 1.0
++        simulator.resolution(160, 120)
++
++    def fullres(self, on):
++        self.WIDTH, self.HEIGHT = (320, 240) if on else (160, 120)
++        simulator.resolution(self.WIDTH, self.HEIGHT)
++
++    def set_vsync(self, on):
++        pass
++
++    def set_framerate(self, fps):
++        pass
++
++    def backlight(self, value=None):
++        if value is None:
++            return self._backlight
++        self._backlight = value
++        return None
++
++    def update(self, *args):
++        pass
+diff --git a/tools/sync_runtime_2026.py b/tools/sync_runtime_2026.py
+new file mode 100644
+index 0000000..ab547df
+--- /dev/null
++++ b/tools/sync_runtime_2026.py
+@@ -0,0 +1,98 @@
++#!/usr/bin/env python3
++"""Vendor the real Tufty 2350 badgeware runtime into runtime2026/firmware.
++
++The GitHub Universe 2026 badge runs a derivative of pimoroni/tufty2350. This
++copies that firmware's Python runtime and ROM fonts verbatim, then applies the
++smallest patches needed to run it on the simulator's C frame loop. Every patch
++asserts that its target text exists exactly once, so a firmware change that
++moves the code fails loudly instead of silently running unpatched code.
++
++Usage: tools/sync_runtime_2026.py /path/to/tufty2350
++"""
++
++import shutil
++import subprocess
++import sys
++from pathlib import Path
++
++HERE = Path(__file__).resolve().parent.parent
++OUT = HERE / "runtime2026" / "firmware"
++
++# (file, old, new, why)
++PATCHES = [
++    (
++        "badgeware/badge.py",
++        "MODEL = os.uname().machine[9:-17].lower()",
++        'MODEL = "tufty"',
++        "the unix port's os.uname() does not name the board",
++    ),
++    (
++        "badgeware/badge.py",
++        "builtins.screen = image(display.WIDTH, display.HEIGHT, memoryview(display))",
++        "builtins.screen = image(display.WIDTH, display.HEIGHT, display.buffer)",
++        "a Python display stub cannot expose the buffer protocol",
++    ),
++    (
++        "badgeware/__init__.py",
++        '__import__(".frozen/badgeware/badge")\n'
++        '__import__(".frozen/badgeware/math")\n'
++        '__import__(".frozen/badgeware/text")\n'
++        '__import__(".frozen/badgeware/filesystem")\n'
++        '__import__(".frozen/badgeware/memory")\n'
++        '__import__(".frozen/badgeware/rtc")\n'
++        'State = __import__(".frozen/badgeware/state").State\n',
++        '__import__("/firmware/badgeware/badge")\n'
++        '__import__("/firmware/badgeware/math")\n'
++        '__import__("/firmware/badgeware/text")\n'
++        '__import__("/firmware/badgeware/filesystem")\n'
++        '__import__("/firmware/badgeware/memory")\n'
++        '__import__("/firmware/badgeware/rtc")\n'
++        'State = __import__("/firmware/badgeware/state").State\n',
++        "the runtime is not frozen into the simulator binary",
++    ),
++]
++
++
++def main() -> int:
++    if len(sys.argv) != 2:
++        print(__doc__)
++        return 2
++    src = Path(sys.argv[1]).resolve()
++    common = src / "modules" / "common"
++    if not (common / "badgeware" / "badge.py").is_file():
++        print(f"error: {src} is not a tufty2350 checkout", file=sys.stderr)
++        return 2
++    rev = subprocess.run(
++        ["git", "-C", str(src), "rev-parse", "HEAD"], capture_output=True, text=True
++    ).stdout.strip() or "unknown"
++
++    if OUT.exists():
++        shutil.rmtree(OUT)
++    (OUT / "badgeware").mkdir(parents=True)
++    for f in sorted((common / "badgeware").glob("*.py")):
++        shutil.copy(f, OUT / "badgeware" / f.name)
++    for name in ("board.py", "wifi.py", "easing.py", "fetch.py"):
++        shutil.copy(common / name, OUT / name)
++    shutil.copytree(src / "romfs" / "fonts", OUT / "rom" / "fonts")
++
++    for rel, old, new, why in PATCHES:
++        path = OUT / rel
++        text = path.read_text()
++        count = text.count(old)
++        if count != 1:
++            print(f"error: patch target in {rel} found {count} times ({why})", file=sys.stderr)
++            return 1
++        path.write_text(text.replace(old, new))
++
++    (OUT / "SOURCE.txt").write_text(
++        f"pimoroni/tufty2350 {rev}\n"
++        "modules/common/badgeware/*.py, board.py, wifi.py, easing.py, fetch.py, romfs/fonts\n"
++        "Patched by tools/sync_runtime_2026.py:\n"
++        + "".join(f"  {rel}: {why}\n" for rel, _o, _n, why in PATCHES)
++    )
++    print(f"synced {rev} into {OUT}")
++    return 0
++
++
++if __name__ == "__main__":
++    sys.exit(main())
