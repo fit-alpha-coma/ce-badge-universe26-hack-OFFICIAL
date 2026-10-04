@@ -48,9 +48,24 @@ class Controls:
 
 
 def menu_move():
-    """-1 / +1 for up/down (or left/right) presses in menus, else 0."""
-    if badge.pressed(BUTTON_UP) or badge.pressed(BUTTON_LEFT):
+    """-1 / +1 for Up / Down presses in a vertical list, else 0."""
+    if badge.pressed(BUTTON_UP):
         return -1
-    if badge.pressed(BUTTON_DOWN) or badge.pressed(BUTTON_RIGHT):
+    if badge.pressed(BUTTON_DOWN):
         return 1
     return 0
+
+
+def back(alt):
+    """BACK is a touch pad only; `alt` is the switch that also goes back on
+    this screen, so the game is fully usable from the physical switches."""
+    return badge.pressed(BUTTON_BACK) or badge.pressed(alt)
+
+
+def chord():
+    """Up + Down together, the physical-switch stand-in for MENU and BACK
+    (both touch-only). True on the frame the second switch goes down."""
+    held = badge.held()
+    if BUTTON_UP in held and BUTTON_DOWN in held:
+        return badge.pressed(BUTTON_UP) or badge.pressed(BUTTON_DOWN)
+    return False

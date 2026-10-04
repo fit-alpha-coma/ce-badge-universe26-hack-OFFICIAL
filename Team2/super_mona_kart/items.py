@@ -40,16 +40,18 @@ class Box:
 
 
 class Bug:
-    def __init__(self, x, y, owner):
+    def __init__(self, x, y, owner, pid=0):
         self.x = x
         self.y = y
         self.owner = owner
+        self.pid = pid
         self.life = BUG_LIFE
         self.age = 0.0
 
 
 class Duck:
-    def __init__(self, kart, target):
+    def __init__(self, kart, target, pid=0):
+        self.pid = pid
         self.x = kart.x + math.cos(kart.heading) * 6
         self.y = kart.y + math.sin(kart.heading) * 6
         self.heading = kart.heading
@@ -72,6 +74,9 @@ class Items:
         self.bugs = []
         self.ducks = []
         self.picked = []    # box indexes picked up locally this step (for party races)
+        self.spawned = []   # (kind, owner, pid, x, y, target id) fired this step
+        self.consumed = []  # pids of bugs and ducks that hit a local kart this step
+        self._pid = 0
 
     def step(self, dt, karts, rank_of, events):
         """Advance boxes, bugs and ducks; resolve pickups and hits."""
@@ -103,6 +108,7 @@ class Items:
                     result = k.hit()
                     if result:
                         events.append((result, k.id, BUG))
+                        self.consumed.append(bug.pid)
                         hit = True
                         break
             if not hit and bug.life > 0:
@@ -138,6 +144,7 @@ class Items:
                     result = k.hit()
                     if result:
                         events.append((result, k.id, DUCK))
+                    self.consumed.append(duck.pid)
                     hit = True
                     break
             if not hit and duck.life > 0:
@@ -157,14 +164,18 @@ class Items:
         elif item == BUG:
             bx = kart.x - math.cos(kart.heading) * 9
             by = kart.y - math.sin(kart.heading) * 9
-            self.bugs.append(Bug(bx, by, kart.id))
+            pid = self.new_pid(kart.id)
+            self.bugs.append(Bug(bx, by, kart.id, pid))
+            self.spawned.append((BUG, kart.id, pid, bx, by, -1))
         elif item == DUCK:
             my_rank = rank_of(kart)
             target = None
             for k in karts:
                 if rank_of(k) == my_rank - 1:
                     target = k
-            self.ducks.append(Duck(kart, target))
+            pid = self.new_pid(kart.id)
+            self.ducks.append(Duck(kart, target, pid))
+            self.spawned.append((DUCK, kart.id, pid, kart.x, kart.y, target.id if target else -1))
         elif item == PUSH:
             my_rank = rank_of(kart)
             for k in karts:
@@ -181,8 +192,18 @@ class Items:
         if 0 <= index < len(self.boxes):
             self.boxes[index].respawn = BOX_RESPAWN
 
-    def remote_bug(self, x, y, owner):
-        self.bugs.append(Bug(x, y, owner))
+    def new_pid(self, owner):
+        # unique across badges: each badge only fires items for karts it owns
+        self._pid += 1
+        return owner * 100000 + self._pid
 
-    def remote_duck(self, kart, target):
-        self.ducks.append(Duck(kart, target))
+    def remote_bug(self, x, y, owner, pid=0):
+        self.bugs.append(Bug(x, y, owner, pid))
+
+    def remote_duck(self, kart, target, pid=0):
+        self.ducks.append(Duck(kart, target, pid))
+
+    def consume(self, pid):
+        """Another badge's kart hit this bug or duck: remove our copy too."""
+        self.bugs = [b for b in self.bugs if b.pid != pid]
+        self.ducks = [d for d in self.ducks if d.pid != pid]

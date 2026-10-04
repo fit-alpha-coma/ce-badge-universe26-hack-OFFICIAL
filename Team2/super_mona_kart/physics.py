@@ -67,6 +67,8 @@ class Kart:
         self.off_course = 0.0
         self.wrong_way = 0.0
         self.finished_ms = None
+        self.dnf = False        # did not finish (race finalised or badge left)
+        self.gone = False       # a party badge that disconnected: not drawn or hit
         self.lap_start_ms = None
         self.best_lap_ms = None
         self.last_lap_ms = None
@@ -298,6 +300,8 @@ class Kart:
             events.append("lap")
         elif old < n // 4 and idx > n * 3 // 4:
             self.lap -= 1
+            # reversing over the line voids the current lap's timing
+            self.lap_start_ms = None
         return events
 
 
@@ -307,11 +311,11 @@ def collide(karts):
     lim = KART_RADIUS * 2
     for i in range(n):
         a = karts[i]
-        if a.fall > 0:
+        if a.fall > 0 or a.gone:
             continue
         for j in range(i + 1, n):
             b = karts[j]
-            if b.fall > 0:
+            if b.fall > 0 or b.gone:
                 continue
             dx = b.x - a.x
             dy = b.y - a.y

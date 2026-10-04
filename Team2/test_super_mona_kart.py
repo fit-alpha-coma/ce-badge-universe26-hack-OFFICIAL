@@ -16,6 +16,7 @@ from geom import Geometry, ROAD, CURB, DROP, SIZE  # noqa: E402
 from physics import Kart, DRIFT_LEVELS  # noqa: E402
 from items import Items, roll, Bug  # noqa: E402
 from race import Race, Entrant, CPU, HUMAN, COUNTDOWN, RACING, award_points  # noqa: E402
+from race import REMOTE as REMOTE_KIND  # noqa: E402
 from rng import Rng  # noqa: E402
 
 
@@ -247,6 +248,108 @@ class RaceTests(unittest.TestCase):
         order = [k.id for k in r.standings()]
         self.assertEqual(order[:2], [2, 0])
         self.assertEqual(order[2:], [1, 3])
+
+
+class ReviewRegressionTests(unittest.TestCase):
+    """Findings from the Codex review, kept fixed."""
+
+    def test_finalize_places_every_kart_once_even_if_it_finishes_later(self):
+        r = Race(TRACKS[0], [Entrant(i, CPU) for i in range(4)], seed=3)
+        r.karts[1].finished_ms = 40000
+        r.finish_order.append(1)
+        order = r.finalize()
+        self.assertEqual(sorted(order), [0, 1, 2, 3])
+        # a DNF kart crossing the line afterwards must not be placed again
+        k = r.karts[2]
+        self.assertTrue(k.dnf)
+        k.lap = r.laps
+        g = r.geo
+        for i in list(range(g.count - 5, g.count)) + [0, 1]:
+            k.x, k.y = g.place(i, 0)
+            for e in k.locate(50000, 0.05):
+                if e == "lap" and k.lap > r.laps and k.finished_ms is None and not k.dnf:
+                    r.finish(k, 50000)
+        self.assertEqual(len(r.finish_order), 4)
+
+    def test_ghost_is_recorded_only_for_time_trials(self):
+        quick = Race(TRACKS[0], [Entrant(0, HUMAN)], seed=1)
+        trial = Race(TRACKS[0], [Entrant(0, HUMAN)], seed=1, items=False, record_ghost=True)
+        for r in (quick, trial):
+            for _ in range(200):
+                r.step(1 / 30, {})
+        self.assertEqual(quick.ghost, [])
+        self.assertGreater(len(trial.ghost), 10)
+
+    def test_reversing_over_the_line_voids_the_lap_time(self):
+        g = Geometry(TRACKS[0])
+        k = Kart(0, 0, CHARACTERS[0]["stats"], g, 0)
+        now = 0
+        for i in list(range(g.count - 5, g.count)) + list(range(0, 6)):
+            k.x, k.y = g.place(i % g.count, 0)
+            now += 50
+            k.locate(now, 0.05)
+        for i in range(5, -6, -1):          # back over the line
+            k.x, k.y = g.place(i % g.count, 0)
+            now += 50
+            k.locate(now, 0.05)
+        for i in range(-5, 6):              # and forward again, a few metres later
+            k.x, k.y = g.place(i % g.count, 0)
+            now += 50
+            k.locate(now, 0.05)
+        self.assertIsNone(k.best_lap_ms)
+
+
+class PartyPacketTests(unittest.TestCase):
+    """Anyone on the network can send packets; junk must be dropped, not crash."""
+
+    def party(self):
+        import party as party_mod
+        p = object.__new__(party_mod.Party)
+        p.id = 5
+
+        class G:
+            pass
+        p.game = G()
+        p.game.race = Race(TRACKS[0], [Entrant(0, HUMAN), Entrant(1, REMOTE_KIND)], seed=1)
+        p.owner = {0: 5, 1: 9}
+        p.members = {5, 9}
+        p.race_id = 77
+        p.remote = {}
+        p.last_seq = {}
+        p.seen = {}
+        return p
+
+    def test_stale_and_foreign_state_packets_are_dropped(self):
+        p = self.party()
+        entry = [1, 100.0, 100.0, 0.5, 10.0, 0.0, 1, 5, 0.5, 0, 0, None]
+        p.handle_race({"id": 9, "t": "st", "r": 77, "s": 10, "k": [entry]}, 0)
+        self.assertEqual(p.remote[1][0][1], 100.0)
+        old = [1, 50.0] + entry[2:]
+        p.handle_race({"id": 9, "t": "st", "r": 77, "s": 9, "k": [old]}, 1)      # reordered
+        p.handle_race({"id": 9, "t": "st", "r": 76, "s": 11, "k": [old]}, 1)     # older race
+        p.handle_race({"id": 8, "t": "st", "r": 77, "s": 12, "k": [old]}, 1)     # not a member
+        self.assertEqual(p.remote[1][0][1], 100.0)
+
+    def test_start_messages_are_validated(self):
+        p = self.party()
+        good = {"id": 3, "ids": [3, 5], "chars": [0, 1], "cpus": [2], "tr": 1, "seed": 7,
+                "race": 42, "at": 1000}
+        self.assertIsNotNone(p.check_start(good))
+        for bad in ({**good, "ids": [3]}, {**good, "chars": [0]}, {**good, "tr": 9},
+                    {**good, "chars": [0, 99]}, {**good, "ids": [3, 3]}, {**good, "id": 5},
+                    {**good, "cpus": [0, 1, 2]}):
+            self.assertIsNone(p.check_start(bad), bad)
+        with self.assertRaises((ValueError, TypeError, KeyError)):
+            p.check_start({**good, "ids": "xx"})
+
+    def test_only_the_owner_may_move_a_kart(self):
+        p = self.party()
+        entry = [1, 100.0, 100.0, 0.5, 10.0, 0.0, 1, 5, 0.5, 0, 0, None]
+        self.assertIsNotNone(p.check_state(entry, 9))
+        self.assertIsNone(p.check_state(entry, 7))           # not the owner
+        self.assertIsNone(p.check_state([0] + entry[1:], 9))  # someone else's kart
+        self.assertIsNone(p.check_state(entry[:5], 9))
+        self.assertIsNone(p.check_state([1, 9999.0] + entry[2:], 9))
 
 
 if __name__ == "__main__":

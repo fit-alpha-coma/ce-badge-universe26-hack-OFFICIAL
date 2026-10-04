@@ -8,13 +8,15 @@ from config import CHARACTERS, TRACKS, DIFFICULTY, ITEM_NAMES, POINTS
 from race import Race, Entrant, HUMAN, CPU, REMOTE, COUNTDOWN, RACING, DONE, award_points, finish_unfinished
 from render import World
 from lights import Lights, OFF, COUNTDOWN as L_COUNT, DRIFT, FINAL, CHASE, LOBBY
-from controls import Controls, menu_move
+from controls import Controls, menu_move, back, chord
 import ui
 from ui import W, H, center, text, panel, prompt, fmt_ms, ordinal
 
 SAVE = "super_mona_kart"
-DEFAULTS = {"lights": True, "assist": True, "tilt": False, "fps": False,
-            "best": {}, "best_lap": {}, "cups": {}, "hard": False}
+DEFAULTS = {"lights": True, "assist": True, "tilt": False, "fps": False, "fast": False,
+            "best": {}, "tt_best": {}, "best_lap": {}, "cups": {}, "hard": False}
+MAX_SUBSTEP = 0.05      # physics never steps more than 50 ms at a time
+MAX_FRAME = 0.2         # a frame slower than this is treated as 200 ms
 
 TITLE, MENU, CHARS, DIFF, TRACKSEL, INTRO, RACE, PAUSE, RESULTS, STANDINGS, PODIUM, SETTINGS, PARTY = range(13)
 
@@ -34,8 +36,11 @@ class Game:
     def __init__(self, art):
         ui.init_colors()
         self.art = art
-        self.save = dict(DEFAULTS)
+        self.save = {k: (dict(v) if isinstance(v, dict) else v) for k, v in DEFAULTS.items()}
         State.load(SAVE, self.save)
+        for k, v in DEFAULTS.items():       # older saves may lack newer keys
+            if k not in self.save:
+                self.save[k] = dict(v) if isinstance(v, dict) else v
         self.lights = Lights(self.save["lights"])
         self.controls = Controls()
         self.controls.tilt = self.save["tilt"]
@@ -83,7 +88,7 @@ class Game:
 
     def update(self):
         self.now = badge.ticks
-        dt = min(0.05, badge.ticks_delta / 1000)
+        dt = min(MAX_FRAME, badge.ticks_delta / 1000)
         if badge.ticks_delta:
             self.fps += (1000.0 / badge.ticks_delta - self.fps) * 0.1
         s = self.state
@@ -184,9 +189,9 @@ class Game:
             panel(46, y, W - 92, 31, color.rgb(60, 90, 200, 210) if sel else None)
             ui.label(name, 58, y + 2, a, 14, ui.WHITE if sel else ui.DIM)
             text(desc, 58, y + 18, a.small, ui.ACCENT if sel else ui.DIM, shadow=False)
-        prompt([("SEL", "choose"), ("BK", "back")], H - 18, a.small)
+        prompt([("^v", "move"), ("SEL", "choose"), ("BK/<", "back")], H - 18, a.small)
         self.cursor = (self.cursor + menu_move()) % len(MODES)
-        if badge.pressed(BUTTON_BACK):
+        if back(BUTTON_LEFT):
             self.go(TITLE)
         elif badge.pressed(BUTTON_SELECT):
             self.mode = self.cursor
@@ -217,12 +222,12 @@ class Game:
         text("from " + ch["app"], 132, 124, a.small, ui.DIM, shadow=False)
         text(ch["blurb"], 132, 136, a.small, ui.ACCENT, shadow=False)
         ui.stat_bars(ch["stats"], 132, 154, a.small)
-        prompt([("<>", "pick"), ("SEL", "race"), ("BK", "back")], H - 18, a.small)
+        prompt([("<>", "pick"), ("SEL", "race"), ("BK/^", "back")], H - 18, a.small)
         if badge.pressed(BUTTON_LEFT):
             self.cursor = (self.cursor - 1) % n
         elif badge.pressed(BUTTON_RIGHT):
             self.cursor = (self.cursor + 1) % n
-        if badge.pressed(BUTTON_BACK):
+        if back(BUTTON_UP):
             self.go(MENU, self.mode)
         elif badge.pressed(BUTTON_SELECT):
             self.char = self.cursor
@@ -246,9 +251,9 @@ class Game:
             cup = self.save["cups"].get(str(i))
             if cup:
                 text(("Gold", "Silver", "Bronze", "")[min(cup, 4) - 1], 82, y + 18, a.small, ui.GOLD, shadow=False)
-        prompt([("SEL", "start"), ("BK", "back")], H - 18, a.small)
+        prompt([("^v", "move"), ("SEL", "start"), ("BK/<", "back")], H - 18, a.small)
         self.cursor = (self.cursor + menu_move()) % len(DIFFICULTY)
-        if badge.pressed(BUTTON_BACK):
+        if back(BUTTON_LEFT):
             self.go(CHARS, self.char)
         elif badge.pressed(BUTTON_SELECT) and not (self.cursor == 2 and not self.save["hard"]):
             self.difficulty = self.cursor
@@ -266,7 +271,7 @@ class Game:
             sel = i == self.cursor
             panel(x, y, 142, 80, color.rgb(60, 90, 200, 220) if sel else None)
             text(tr["name"], x + 6, y + 4, a.small, ui.WHITE if sel else ui.DIM)
-            best = self.save["best"].get(tr["key"])
+            best = self.save["tt_best" if self.mode == TRIAL else "best"].get(tr["key"])
             text("Best " + fmt_ms(best), x + 6, y + 64, a.small, ui.GOLD if best else ui.DIM, shadow=False)
             screen.pen = color.rgb(*tr["ground"][0])
             screen.shape(shape.rounded_rectangle(x + 90, y + 16, 46, 46, 4))
@@ -277,18 +282,14 @@ class Game:
                 bx, by = pts[(j + 1) % len(pts)]
                 screen.shape(shape.line(x + 90 + ax * 46 / 256, y + 16 + ay * 46 / 256,
                                         x + 90 + bx * 46 / 256, y + 16 + by * 46 / 256, 3))
-        prompt([("SEL", "race"), ("BK", "back")], H - 18, a.small)
+        prompt([("<>", "pick"), ("SEL", "race"), ("BK/^", "back")], H - 18, a.small)
         m = 0
         if badge.pressed(BUTTON_LEFT):
             m = -1
-        elif badge.pressed(BUTTON_RIGHT):
+        elif badge.pressed(BUTTON_RIGHT) or badge.pressed(BUTTON_DOWN):
             m = 1
-        elif badge.pressed(BUTTON_UP):
-            m = -2
-        elif badge.pressed(BUTTON_DOWN):
-            m = 2
         self.cursor = (self.cursor + m) % len(TRACKS)
-        if badge.pressed(BUTTON_BACK):
+        if back(BUTTON_UP):
             self.go(CHARS, self.char)
         elif badge.pressed(BUTTON_SELECT):
             self.track = self.cursor
@@ -306,7 +307,7 @@ class Game:
         gc.collect()
         if self.mode == TRIAL:
             ents = [Entrant(self.char, HUMAN)]
-            self.race = Race(spec, ents, items=False, start_boosts=3, seed=1, grid=[0])
+            self.race = Race(spec, ents, items=False, start_boosts=3, seed=1, grid=[0], record_ghost=True)
             g = self._load_ghost(spec["key"])
             self.ghost, self.ghost_char = g if g else (None, 0)
         else:
@@ -337,7 +338,7 @@ class Game:
     def _enter_race(self, track):
         import gc
         gc.collect()
-        self.world = World(self.art, track, TRACKS[track])
+        self.world = World(self.art, track, TRACKS[track], fast=self.save["fast"])
         k = self.race.karts[self.me]
         self.world.follow(k.x, k.y, k.heading, 0, snap=True)
         self.banners = []
@@ -360,23 +361,36 @@ class Game:
         sub = {GP: "Race %d of %d" % (self.cup_race + 1, len(TRACKS)),
                QUICK: "Quick Race", TRIAL: "Time Trial", PARTY_MODE: "Party race"}.get(self.mode, "")
         center(sub + "  -  %d laps" % self.race.laps, 70, a.small, ui.WHITE)
-        prompt([("<>", "steer"), ("SEL", "item"), ("BK/^", "drift"), ("v", "brake")], H - 18, a.small)
+        prompt([("<>", "steer"), ("SEL", "item"), ("BK/^", "drift"), ("v", "brake")], H - 34, a.small)
+        prompt([("MN/^v", "pause")] if not self.party else [], H - 18, a.small)
         if self.party:
             self.party.before_step(0)    # keep receiving while the card shows
-        if self.since() > 2400 or (badge.pressed(BUTTON_SELECT) and not self.party):
+            if self.party.started_countdown():
+                self.go(RACE)
+        elif self.since() > 2400 or badge.pressed(BUTTON_SELECT):
             self.go(RACE)
 
     def racing(self, dt):
         r = self.race
         me = r.karts[self.me]
         a = self.art
-        controls = {self.me: self.controls.race(dt, self.save["assist"])}
+        controls = {self.me: self.controls.race(min(dt, MAX_SUBSTEP), self.save["assist"])}
         if self.party:
             self.party.before_step(dt)
-        r.step(dt, controls)
+        # slow frames run several short physics steps, so a badge at 15 fps
+        # drives exactly as far as one at 60 fps
+        n = 1
+        while dt / n > MAX_SUBSTEP:
+            n += 1
+        sub = dt / n
+        for i in range(n):
+            clock = self.party.clock() if (self.party and i == n - 1) else None
+            r.step(sub, controls, clock)
+            self.handle_events(r.events, me)
+            if i == 0:
+                controls = {self.me: controls[self.me][:3] + (False,) + controls[self.me][4:]}
         if self.party:
             self.party.after_step(dt)
-        self.handle_events(r.events, me)
         w = self.world
         w.follow(me.x, me.y, me.heading, dt)
         if w.shake > 0:
@@ -412,7 +426,7 @@ class Game:
             if waited > 2500 and (everyone or waited > patience or self.mode == TRIAL):
                 finish_unfinished(r)
                 self.end_race()
-        elif badge.pressed(BUTTON_MENU) and not self.party:
+        elif (badge.pressed(BUTTON_MENU) or chord()) and not self.party:
             self.go(PAUSE)
         if r.phase == RACING and me.finished_ms is None:
             if me.drift:
@@ -475,11 +489,13 @@ class Game:
         r = self.race
         me = r.karts[self.me]
         key = TRACKS[self.track]["key"]
-        if me.finished_ms is not None:
-            best = self.save["best"].get(key)
+        if me.finished_ms is not None and not me.dnf:
+            # time trials (no items, three boosts) keep their own records and ghost
+            table = "tt_best" if self.mode == TRIAL else "best"
+            best = self.save[table].get(key)
             self.new_record = best is None or me.finished_ms < best
             if self.new_record:
-                self.save["best"][key] = me.finished_ms
+                self.save[table][key] = me.finished_ms
                 if self.mode == TRIAL:
                     State.save("smk_ghost_" + key, {"g": r.ghost, "c": self.char})
             lap = self.save["best_lap"].get(key)
@@ -505,7 +521,7 @@ class Game:
             center(("> " if sel else "") + o, 102 + i * 20, a.small, ui.WHITE if sel else ui.DIM)
         self.cursor = (self.cursor + menu_move()) % len(opts)
         self.lights.set(OFF)
-        if badge.pressed(BUTTON_MENU) or badge.pressed(BUTTON_BACK):
+        if badge.pressed(BUTTON_MENU) or back(BUTTON_LEFT) or chord():
             self.cursor = 0
             self.state = RACE
         elif badge.pressed(BUTTON_SELECT):
@@ -644,20 +660,20 @@ class Game:
         a = self.art
         ui.heading("Settings", 10, a, 22)
         rows = (("Case lights", "lights"), ("Steering assist", "assist"),
-                ("Tilt steering", "tilt"), ("Show frame rate", "fps"))
+                ("Tilt steering", "tilt"), ("Fast graphics", "fast"), ("Show frame rate", "fps"))
         for i, (name, key) in enumerate(rows):
-            y = 56 + i * 30
+            y = 46 + i * 28
             sel = i == self.cursor
-            panel(50, y, W - 100, 26, color.rgb(60, 90, 200, 210) if sel else None)
+            panel(50, y, W - 100, 25, color.rgb(60, 90, 200, 210) if sel else None)
             ui.label(name, 62, y + 4, a, 14, ui.WHITE if sel else ui.DIM)
             ui.label("On" if self.save[key] else "Off", W - 92, y + 4, a, 14, ui.ACCENT if self.save[key] else ui.DIM)
-        y = 56 + len(rows) * 30
+        y = 46 + len(rows) * 28
         sel = self.cursor == len(rows)
-        panel(50, y, W - 100, 26, color.rgb(160, 60, 60, 210) if sel else None)
+        panel(50, y, W - 100, 25, color.rgb(160, 60, 60, 210) if sel else None)
         ui.label("Clear records", 62, y + 4, a, 14, ui.WHITE if sel else ui.DIM)
-        prompt([("SEL", "change"), ("BK", "back")], H - 18, a.small)
+        prompt([("^v", "move"), ("SEL", "change"), ("BK/<", "back")], H - 18, a.small)
         self.cursor = (self.cursor + menu_move()) % (len(rows) + 1)
-        if badge.pressed(BUTTON_BACK):
+        if back(BUTTON_LEFT):
             self.persist()
             self.go(MENU, SETUP)
         elif badge.pressed(BUTTON_SELECT):
@@ -671,9 +687,11 @@ class Game:
                 if key == "lights" and self.save["lights"]:
                     self.lights.flash("boost", self.now, 400)
             else:
-                for k in ("best", "best_lap", "cups"):
+                for k in ("best", "tt_best", "best_lap", "cups"):
                     self.save[k] = {}
                 self.save["hard"] = False
+                for tr in TRACKS:
+                    State.delete("smk_ghost_" + tr["key"])
                 self.banner("Records cleared", 900)
             self.persist()
 

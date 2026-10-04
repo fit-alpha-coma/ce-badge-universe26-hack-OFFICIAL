@@ -18,7 +18,7 @@ def decode(data):
         msg = json.loads(data)
     except (ValueError, TypeError):
         return None
-    if not isinstance(msg, dict) or msg.get("v") != VERSION or "id" not in msg:
+    if not isinstance(msg, dict) or msg.get("v") != VERSION or not isinstance(msg.get("id"), int):
         return None
     return msg
 

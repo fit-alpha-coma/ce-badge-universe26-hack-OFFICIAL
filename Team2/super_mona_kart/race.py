@@ -10,6 +10,7 @@ from ai import Driver
 
 COUNTDOWN_MS = 3000
 GHOST_EVERY_MS = 100
+GHOST_MAX = 6000                      # ten minutes of samples at most
 
 COUNTDOWN, RACING, DONE = range(3)
 
@@ -25,7 +26,7 @@ class Entrant:
 
 class Race:
     def __init__(self, track, entrants, difficulty=1, seed=None, items=True, laps=None,
-                 grid=None, start_boosts=0):
+                 grid=None, start_boosts=0, record_ghost=False):
         self.track = track
         self.geo = Geometry(track)
         self.laps = laps or track["laps"]
@@ -49,6 +50,7 @@ class Race:
         self.clock_ms = -COUNTDOWN_MS         # race time; negative during countdown
         self.events = []
         self.finish_order = []
+        self.record_ghost = record_ghost      # time trial only
         self.ghost = []                       # (x, y, heading) samples of kart 0
         self._ghost_next = 0
         self._ranks = {}
@@ -93,15 +95,20 @@ class Race:
 
     # -- simulation --------------------------------------------------------------
 
-    def step(self, dt, controls):
+    def step(self, dt, controls, clock=None):
         """Advance dt seconds.
 
         controls maps kart id -> (steer, brake, drift_held, use_item, assist)
-        for human karts; computer karts drive themselves and remote karts are moved by the
-        network layer. Events from this step are left in self.events.
+        for human karts; computer karts drive themselves and remote karts are
+        moved by the network layer. A party race passes `clock`, the race time
+        from a start moment shared by every badge, so finish times compare.
+        Events from this step are left in self.events.
         """
         self.events = []
-        ms = int(dt * 1000)
+        if self.items:
+            self.items.spawned = []
+            self.items.consumed = []
+        ms = int(dt * 1000) if clock is None else max(0, clock - self.clock_ms)
         if self.phase == COUNTDOWN:
             before = self.clock_ms
             self.clock_ms += ms
@@ -127,7 +134,9 @@ class Race:
             kind = self.entrants[k.id].kind
             if kind == REMOTE:
                 continue
-            if k.finished_ms is not None:
+            if k.gone:
+                continue
+            if k.finished_ms is not None or k.dnf:
                 # cool-down lap: drive gently along the racing line
                 d = self.drivers.get(k.id) or self._cooldown_driver(k)
                 steer, _b, _d, _t, _u = d.control(dt, self)
@@ -152,27 +161,27 @@ class Race:
                             k.item = BOOST
             for e in evs:
                 self.events.append((e, k.id, None))
-        collide([k for k in self.karts if self.entrants[k.id].kind != REMOTE] +
-                [k for k in self.karts if self.entrants[k.id].kind == REMOTE])
+        collide([k for k in self.karts if not k.gone])
         for k in self.karts:
-            if self.entrants[k.id].kind == REMOTE:
+            if self.entrants[k.id].kind == REMOTE or k.gone:
                 continue
             for e in k.locate(now, dt):
                 self.events.append((e, k.id, None))
-                if e == "lap" and k.lap > self.laps and k.finished_ms is None:
+                if e == "lap" and k.lap > self.laps and k.finished_ms is None and not k.dnf:
                     self.finish(k, now)
                 elif e == "lap" and k.lap == self.laps:
                     self.events.append(("final", k.id, None))
         self._update_ranks()
         if self.items:
             # a remote badge decides its own pickups and hits
-            local = [k for k in self.karts if self.entrants[k.id].kind != REMOTE]
+            local = [k for k in self.karts if self.entrants[k.id].kind != REMOTE and not k.gone]
             self.items.step(dt, local, self.rank_of, self.events)
-        if now >= self._ghost_next:
-            k0 = self.karts[0]
+        k0 = self.karts[0]
+        if self.record_ghost and k0.finished_ms is None and now >= self._ghost_next \
+                and len(self.ghost) < GHOST_MAX:
             self.ghost.append((round(k0.x, 1), round(k0.y, 1), round(k0.heading, 2)))
             self._ghost_next += GHOST_EVERY_MS
-        if all(k.finished_ms is not None for k in self.humans()) and self.humans():
+        if self.humans() and all(k.finished_ms is not None or k.dnf for k in self.humans()):
             if self.phase != DONE:
                 self.phase = DONE
                 self.events.append(("done", None, None))
@@ -190,6 +199,15 @@ class Race:
     def _update_ranks(self):
         self._ranks = {k.id: i for i, k in enumerate(self.standings())}
 
+    def finalize(self):
+        """Freeze the result: karts still racing get a DNF, placed by progress.
+        After this nothing can join finish_order twice."""
+        for k in self.standings():
+            if k.finished_ms is None and k.id not in self.finish_order:
+                k.dnf = True
+                self.finish_order.append(k.id)
+        return self.finish_order
+
     def results(self):
         """Final order with race times (None for karts still racing)."""
         return [(k.id, k.finished_ms) for k in self.standings()]
@@ -205,7 +223,4 @@ def award_points(order, totals):
 
 def finish_unfinished(race):
     """Place karts that had not finished when the humans did, by progress."""
-    for k in race.standings():
-        if k.finished_ms is None:
-            race.finish_order.append(k.id)
-    return race.finish_order
+    return race.finalize()

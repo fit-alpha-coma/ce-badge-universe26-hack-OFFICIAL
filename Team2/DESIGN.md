@@ -58,7 +58,12 @@ labels):
 | Drift | BACK (right thumb) | Up |
 | Use item | SELECT | Select |
 | Brake / reverse | D-pad DOWN | Down |
-| Pause | MENU | (none; HOME returns to the launcher) |
+| Pause | MENU | Up + Down together |
+| Back in menus | BACK | Left in lists, Up on the racer and track pickers, Up + Down in the party lobby |
+
+HOME always returns to the launcher (the firmware owns it). On-screen prompts
+use the input test app's own pad labels (SEL, BK, MN) and show the switch
+alternative after a slash, for example "BK/<".
 
 Steering assist (on by default, can be turned off) nudges the kart back toward
 the road when no direction is held. Tilt steering is an option.
@@ -138,10 +143,36 @@ public.
 
 | Risk | Mitigation |
 | --- | --- |
-| Frame rate on the real RP2350 | The floor renders at 160x120 and is scaled up; MENU shows the frame rate; a Fast graphics setting draws everything at 160x120 |
+| Frame rate on the real RP2350 | The sky and floor render at 160x120 and are scaled up in one blit; Settings can show the frame rate; Fast graphics computes every other floor row (drawn twice) and hides scenery. Slow frames run several short physics steps, so speed does not depend on frame rate |
 | Conference Wi-Fi blocks badge-to-badge traffic | Party mode explains this and suggests a phone hotspot; everything else works offline |
 | Physical switch mapping (A, B, C = Left, Right, Select) | Taken from the documented bottom-row order; check on the first badge we hold |
 
 ## 8. Review log
 
-Filled in as reviews run.
+### Round 1: Codex (gpt-6.1-sol, medium), 2026-10-04, 19 findings
+
+| # | Sev | Finding | Disposition |
+| --- | --- | --- | --- |
+| 1 | High | `render.py` used `fast` instead of `self.fast` (NameError) | Fixed; the emulator also caught it |
+| 2 | High | Finalising results left unfinished karts able to finish again; `None` in a sort | Fixed: `Race.finalize()` marks DNF once; finishers sort before DNFs; test added |
+| 3 | High | Party finish times came from unsynchronised clocks; frames over 50 ms lost time | Fixed: hellos carry clocks, the host names a shared countdown start, race time is taken from it; slow frames run substeps |
+| 4 | High | `badgesim.py` returned success after a crash | Fixed: exit 1 on `FATAL`, a traceback, or an unfinished headless run |
+| 5 | High | Ghost samples grew without bound in every mode | Fixed: recorded only in time trials, until the finish, capped at 6000; test added |
+| 6 | Medium | Repeated start messages rebuilt the race | Fixed: race id; a start already accepted is ignored |
+| 7 | Medium | No race id or sequence number on state packets | Fixed: race id and per-badge sequence; stale and foreign packets dropped; test added |
+| 8 | Medium | A disconnected badge's karts stayed frozen forever | Fixed: silent for 4 s means DNF; its karts leave collisions, items and the screen |
+| 9 | Medium | Item broadcasts read the last projectile after the step | Fixed: spawn data captured at use time |
+| 10 | Medium | Boxes and projectiles resolved independently per badge | Partly fixed: projectiles have ids and a hit removes them everywhere. Two badges taking one box in the same 66 ms both get an item; accepted as rare and harmless |
+| 11 | Medium | Box events accepted from anyone | Fixed: events only from badges in the current race id |
+| 12 | Medium | Time trial records shared with item races | Fixed: separate `tt_best` and ghost |
+| 13 | Medium | Reversing over the line produced a fake best lap | Fixed: reversing voids the lap's timing; test added |
+| 14 | Medium | Pause and party exits needed touch-only MENU/BACK | Fixed: Up + Down chord; prompts show it |
+| 15 | Medium | Ghost alpha set on the source image | Fixed: `screen.alpha`, per the v3.1.0 API |
+| 16 | Medium | Headless runs use a synthetic clock | Kept by design for deterministic tests; `--realtime` exists, and frame-rate claims are left to the physical badge |
+| 17 | Low | Clear records kept ghosts | Fixed: `State.delete` for every ghost |
+| 18 | Low | The emulator cannot tell touch from switches or simulate inversion | Accepted and documented: the game uses neither `touched()` nor `upside_down()` |
+| 19 | Low | DESIGN overstated the performance controls | Fixed in section 7 |
+
+A separate automated security review flagged that malformed party packets
+could raise and reset the badge. Fixed: every field is type- and range-checked
+and bad packets are dropped (tests added).

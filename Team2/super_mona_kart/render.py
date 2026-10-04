@@ -28,8 +28,9 @@ def _mix(a, b, t):
 
 
 class World:
-    def __init__(self, art, track_index, spec):
+    def __init__(self, art, track_index, spec, fast=False):
         self.art = art
+        self.fast = fast
         self.spec = spec
         self.tex, self.mini = art.track(track_index)
         self.scenery_spots = SCENERY.get(spec["key"], ())
@@ -44,6 +45,9 @@ class World:
         for y in range(HORIZON + 1, LH):
             z = CAM_HEIGHT * FOCAL / (y - HORIZON + 0.5)
             if z > FAR * 1.7:
+                continue
+            # fast graphics: sample every other row and draw it two rows tall
+            if fast and (y - HORIZON) % 2 == 0 and y + 1 < LH:
                 continue
             self.rows.append((y, z, z * (LW / 2) / FOCAL))
             fade = (z - FAR * 0.42) / (FAR * 1.2)
@@ -151,7 +155,13 @@ class World:
             my = cy + sa * z
             ox = -sa * hw
             oy = ca * hw
-            blit(tex, 0, y, LW, (mx - ox) * inv, (my - oy) * inv, (mx + ox) * inv, (my + oy) * inv)
+            u0 = (mx - ox) * inv
+            v0 = (my - oy) * inv
+            u1 = (mx + ox) * inv
+            v1 = (my + oy) * inv
+            blit(tex, 0, y, LW, u0, v0, u1, v1)
+            if self.fast:
+                blit(tex, 0, y - 1, LW, u0, v0, u1, v1)
         i = 0
         for y, z, hw in self.rows:
             pen = self.fog[i]
@@ -194,7 +204,7 @@ class World:
         sa = math.sin(self.angle)
         camx, camy = self.x, self.y
         far = FAR * 1.4
-        for sx, sy, kind in self.scenery_spots:
+        for sx, sy, kind in (() if self.fast else self.scenery_spots):
             dx = sx - camx
             dy = sy - camy
             z = dx * ca + dy * sa
@@ -213,7 +223,7 @@ class World:
             for duck in items.ducks:
                 draw.append((self._z(duck.x, duck.y), 3, 0, duck.x, duck.y))
         for k in karts:
-            if k.fall > 0:
+            if k.fall > 0 or k.gone:
                 continue
             draw.append((self._z(k.x, k.y), 4, k, k.x, k.y))
         if ghost is not None:
@@ -305,6 +315,7 @@ class World:
     def _draw_ghost(self, g, px, py, s):
         w = SPRITE_WORLD * s
         img = self.art.karts[g[3]][0] if w >= 32 else self.art.karts_half[g[3]][0]
-        img.alpha = 110
+        # alpha belongs to the image drawn into (PicoVector v3.1.0 image.alpha)
+        screen.alpha = 110
         self._blit(img, px - w / 2, py - w * 0.97, w, w)
-        img.alpha = 255
+        screen.alpha = 255

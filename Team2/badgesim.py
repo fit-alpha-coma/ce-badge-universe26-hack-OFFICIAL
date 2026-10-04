@@ -216,9 +216,14 @@ def main() -> int:
         )
         noise = ("micropython_init", "badgeware_init", 'Running "', "Hot reload",
                  "badgeware_screenshot")
-        for line in (result.stdout + result.stderr).splitlines():
+        output = result.stdout + result.stderr
+        for line in output.splitlines():
             if line.strip() and not line.startswith(noise):
                 print(line)
+        # the simulator exits 255 for every stop, so judge by what it printed
+        failed = "FATAL:" in output or "Traceback" in output
+        if not args.play and "BADGESIM_FREE" not in output:
+            failed = True
         if args.state and (root / "state").is_dir():
             if args.state.exists():
                 shutil.rmtree(args.state)
@@ -229,6 +234,9 @@ def main() -> int:
             for png in pngs:
                 shutil.copy(png, args.out / png.name)
             print(f"saved {len(pngs)} screenshot(s) to {args.out}")
+    if failed:
+        print("badgesim: the app failed (see above)", file=sys.stderr)
+        return 1
     return 0
 
 
