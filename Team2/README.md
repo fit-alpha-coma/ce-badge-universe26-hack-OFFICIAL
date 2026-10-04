@@ -76,5 +76,25 @@ BADGEWARE_SIMULATOR=/path/to/badgeware-simulator python3 Team2/tuxsim.py Team2/t
 ```
 
 `--press START-END:BUTTON` holds a button for that range of frames (60 frames
-per second). The simulator does not model touch, the IMU, Wi-Fi or the
+per second).
+
+To play with the keyboard, build the windowed simulator too
+(`cmake -S micropython -B build && cmake --build build -j8`) and run:
+
+```sh
+BADGEWARE_SIMULATOR=/path/to/badgeware-simulator python3 Team2/tuxsim.py Team2/tux_kart --play --up-as MENU
+```
+
+The simulator reads only six keys, so they map to the badge like this:
+
+| Key | Badge action | In Tux Kart |
+| --- | --- | --- |
+| Left / Right arrow | LEFT / RIGHT | Steer |
+| Down arrow | DOWN | Brake |
+| Space | SELECT | Start, resume, race again |
+| H | BACK | Pause, quit to title |
+| Up arrow | MENU (with `--up-as MENU`) | Frame rate; steering mode on the title |
+
+P saves a screenshot (copied to `--out` when the window closes) and Esc
+reloads the app. The simulator does not model touch, the IMU, Wi-Fi or the
 RP2350's speed and memory.

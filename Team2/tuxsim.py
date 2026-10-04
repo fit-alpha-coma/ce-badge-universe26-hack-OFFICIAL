@@ -19,7 +19,6 @@ Example:
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import shutil
 import subprocess
@@ -30,8 +29,9 @@ from pathlib import Path
 SHIM = r'''
 import sys, builtins, simulator, picovector, gc
 
-simulator.realtime(False)
 CONFIG = __CONFIG__
+PLAY = CONFIG["play"]
+simulator.realtime(PLAY)
 
 BUTTON_UP, BUTTON_DOWN, BUTTON_LEFT, BUTTON_RIGHT = 1, 2, 3, 4
 BUTTON_SELECT, BUTTON_BACK, BUTTON_MENU, BUTTON_HOME = 5, 6, 7, 8
@@ -42,7 +42,7 @@ for _k, _v in NAMES.items():
 
 # Simulator keys: Left arrow = A, Space = B, Right arrow = C.
 IO_MAP = {io.BUTTON_A: BUTTON_LEFT, io.BUTTON_C: BUTTON_RIGHT,
-          io.BUTTON_B: BUTTON_SELECT, io.BUTTON_UP: BUTTON_UP,
+          io.BUTTON_B: BUTTON_SELECT, io.BUTTON_UP: NAMES[CONFIG["up_as"]],
           io.BUTTON_DOWN: BUTTON_DOWN, io.BUTTON_HOME: BUTTON_BACK}
 
 SCRIPT = []
@@ -146,8 +146,12 @@ SHOTS = set(CONFIG["shots"])
 
 def update():
     global frame
-    badge.ticks = int(frame * 1000 / 60)
-    badge.ticks_delta = 16 if frame else 0
+    if PLAY:
+        badge.ticks = io.ticks
+        badge.ticks_delta = io.ticks_delta
+    else:
+        badge.ticks = int(frame * 1000 / 60)
+        badge.ticks_delta = 16 if frame else 0
     badge._poll(frame)
     screen.pen = badge.default_clear
     screen.clear()
@@ -159,7 +163,7 @@ def update():
     if frame in SHOTS:
         simulator.screenshot("frame-%05d" % frame)
     frame += 1
-    if frame >= CONFIG["frames"]:
+    if not PLAY and frame >= CONFIG["frames"]:
         print("TUXSIM_FREE", gc.mem_free())
         sys.exit(255)
 '''
@@ -177,6 +181,17 @@ def main() -> int:
         help="FRAME_START-FRAME_END:BUTTON, repeatable (UP DOWN LEFT RIGHT SELECT BACK MENU)",
     )
     parser.add_argument("--tilt", type=float, default=0.0, help="simulated IMU x tilt in g")
+    parser.add_argument(
+        "--play",
+        action="store_true",
+        help="open the simulator window and play with the keyboard in real time",
+    )
+    parser.add_argument(
+        "--up-as",
+        default="UP",
+        choices=["UP", "MENU", "BACK", "SELECT"],
+        help="badge action sent by the Up arrow (the simulator has only six keys)",
+    )
     parser.add_argument("--out", type=Path, default=Path("tuxsim-shots"))
     parser.add_argument(
         "--sim",
@@ -186,7 +201,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    binary = args.sim / "build-headless" / "micropython"
+    binary = args.sim / ("build" if args.play else "build-headless") / "micropython"
     if not binary.is_file():
         print(f"error: simulator binary not found at {binary}", file=sys.stderr)
         return 2
@@ -201,6 +216,8 @@ def main() -> int:
         "shots": [int(s) for s in args.shots.split(",") if s],
         "press": args.press,
         "tilt": args.tilt,
+        "play": args.play,
+        "up_as": args.up_as,
     }
     with tempfile.TemporaryDirectory(prefix="tuxsim-") as tmp:
         work = Path(tmp)
@@ -208,10 +225,14 @@ def main() -> int:
         shutil.copytree(app, work / "root" / "system" / "apps" / app.name)
         (work / "screenshots").mkdir()
         (work / "root" / "main.py").write_text(
-            SHIM.replace("__CONFIG__", json.dumps(config))
+            SHIM.replace("__CONFIG__", repr(config))
         )
         result = subprocess.run(
-            [str(binary)], cwd=work, capture_output=True, text=True, timeout=600
+            [str(binary)],
+            cwd=work,
+            capture_output=True,
+            text=True,
+            timeout=None if args.play else 600,
         )
         noise = ("micropython_init", "badgeware_init", "Running \"", "Hot reload")
         for line in (result.stdout + result.stderr).splitlines():
