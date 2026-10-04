@@ -1,0 +1,549 @@
+"""Logic tests for Super Mona Kart. Standard library only:
+
+    python3 -m unittest Team2/test_super_mona_kart.py -v
+"""
+
+import math
+import sys
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "super_mona_kart"))
+
+import config  # noqa: E402
+from config import TRACKS, CHARACTERS, BOOST, BUG, DUCK, SHIELD, PUSH, POINTS  # noqa: E402
+from geom import Geometry, ROAD, CURB, DROP, SIZE  # noqa: E402
+from physics import Kart, DRIFT_LEVELS  # noqa: E402
+from items import Items, roll, Bug  # noqa: E402
+from race import Race, Entrant, CPU, HUMAN, COUNTDOWN, RACING, award_points  # noqa: E402
+from race import REMOTE as REMOTE_KIND  # noqa: E402
+from rng import Rng  # noqa: E402
+
+
+def drive_to(kart, x, y):
+    kart.x, kart.y = x, y
+
+
+class TrackTests(unittest.TestCase):
+    def test_roads_never_overlap(self):
+        for spec in TRACKS:
+            g = Geometry(spec)
+            need = 2 * (g.road + g.curb) + 2
+            self.assertGreaterEqual(g.min_clearance(), need, spec["name"])
+
+    def test_lap_lengths_give_one_minute_races(self):
+        for spec in TRACKS:
+            g = Geometry(spec)
+            self.assertTrue(1200 <= g.length <= 2100, (spec["name"], g.length))
+
+    def test_everything_sits_inside_the_world_and_on_the_road(self):
+        for spec in TRACKS:
+            g = Geometry(spec)
+            for x, y in g.points:
+                margin = g.road + g.curb
+                self.assertTrue(margin <= x <= SIZE - margin and margin <= y <= SIZE - margin,
+                                (spec["name"], x, y))
+            for slot in range(4):
+                x, y, h, i = g.grid_slot(slot)
+                self.assertEqual(g.surface(g.nearest(x, y, i)[2]), ROAD, spec["name"])
+            for px, py, _h in g.pads:
+                self.assertEqual(g.surface(g.nearest(px, py, g.nearest_global(px, py))[2]), ROAD)
+            items = Items(g, Rng(1))
+            for b in items.boxes:
+                lat = g.nearest(b.x, b.y, g.nearest_global(b.x, b.y))[2]
+                self.assertEqual(g.surface(lat), ROAD, spec["name"])
+
+    def test_start_line_is_on_a_straight(self):
+        for spec in TRACKS:
+            g = Geometry(spec)
+            self.assertLess(abs(g.curvature(-6, 10)), 0.6, spec["name"])
+
+
+class FairnessTests(unittest.TestCase):
+    def test_character_stats_trade_off_evenly(self):
+        # 12 points, or 11 for a racer whose trait is worth the twelfth
+        for c in CHARACTERS:
+            want = 11 if c.get("trait") else 12
+            self.assertEqual(sum(c["stats"]), want, c["name"])
+            self.assertTrue(all(1 <= v <= 5 for v in c["stats"]), c["name"])
+        keys = [c["key"] for c in CHARACTERS]
+        self.assertEqual(len(keys), len(set(keys)))
+
+    def test_every_racer_has_art_and_credit_where_needed(self):
+        assets = Path(__file__).resolve().parent / "super_mona_kart" / "assets"
+        for c in CHARACTERS:
+            self.assertTrue((assets / ("kart_%s.png" % c["key"])).is_file(), c["key"])
+            self.assertTrue((assets / ("kart_%s_half.png" % c["key"])).is_file(), c["key"])
+        credits = " ".join(config.CREDITS)
+        for name in ("Larry Ewing", "The GIMP", "Renee French", "New BSD", "CC0"):
+            self.assertIn(name, credits)
+        google = ("The Android robot is reproduced or modified from work created and shared by "
+                  "Google and used according to terms described in the Creative Commons 3.0 "
+                  "Attribution License.")
+        self.assertIn(google, credits)
+        notices = (assets.parent / "NOTICES.txt").read_text()
+        self.assertIn(" ".join(google.split()), " ".join(notices.split()))
+        for url in ("creativecommons.org/licenses/by/4.0", "creativecommons.org/licenses/by/3.0",
+                    "wiki.openjdk.org/display/duke"):
+            self.assertIn(url, notices)
+
+    def test_leader_never_gets_attack_or_comeback_items(self):
+        rng = Rng(3)
+        got = {roll(0, rng) for _ in range(2000)}
+        self.assertNotIn(PUSH, got)
+        self.assertNotIn(DUCK, got)
+
+    def test_force_push_only_for_last_place(self):
+        rng = Rng(4)
+        for rank in (0, 1, 2):
+            self.assertNotIn(PUSH, {roll(rank, rng) for _ in range(2000)})
+        self.assertIn(PUSH, {roll(3, rng) for _ in range(2000)})
+
+    def test_points_reward_winning(self):
+        self.assertEqual(list(POINTS), sorted(POINTS, reverse=True))
+        self.assertEqual(award_points([2, 0, 1, 3], {}), {2: 10, 0: 7, 1: 5, 3: 3})
+
+
+class RosterTests(unittest.TestCase):
+    def test_unlocks_follow_their_goals(self):
+        from progress import unlocked, newly_unlocked, starters
+        save = {"unlocked": [], "cups": {}, "tt_best": {}}
+        self.assertEqual(sorted(CHARACTERS[i]["key"] for i in unlocked(save)), sorted(starters()))
+        self.assertIn("tux", starters())
+        self.assertEqual(newly_unlocked(save), [])
+        save["cup_done"] = True
+        self.assertEqual(newly_unlocked(save), ["Ferris"])
+        save["cups"] = {"0": 1, "1": 2}
+        self.assertEqual(newly_unlocked(save), ["Gopher"])          # Normal was not won
+        save["tt_best"] = {t["key"]: 60000 for t in TRACKS}
+        self.assertEqual(newly_unlocked(save), ["Android robot"])
+        self.assertEqual(newly_unlocked(save), [])                  # only once
+
+    def test_rivals_are_three_different_unlocked_racers(self):
+        from progress import pick_rivals
+        rng = Rng(4)
+        pool = [0, 1, 2, 3, 4]
+        for player in pool:
+            for _ in range(20):
+                r = pick_rivals(player, pool, rng)
+                self.assertEqual(len(r), 3)
+                self.assertEqual(len(set(r)), 3)
+                self.assertNotIn(player, r)
+                self.assertTrue(set(r) <= set(pool))
+
+    def test_old_saves_get_earned_unlocks(self):
+        from progress import newly_unlocked
+        save = {"unlocked": [], "cups": {"0": 1, "1": 1}, "tt_best": {}, "cup_done": True}
+        got = newly_unlocked(save)
+        self.assertEqual(sorted(got), ["Duke", "Ferris", "Gopher"])
+
+    def test_tux_grip_trait_does_nothing_on_grass(self):
+        keys = [c["key"] for c in CHARACTERS]
+        meadow = Geometry(TRACKS[0])
+        out = []
+        for trait in (None, "ice"):
+            k = Kart(0, keys.index("tux"), CHARACTERS[keys.index("tux")]["stats"], meadow, 0, trait)
+            k.surface = 2
+            h = k.heading
+            k.vx, k.vy = math.cos(h) * 40 - math.sin(h) * 20, math.sin(h) * 40 + math.cos(h) * 20
+            k.drive(0.1, 0, False, False)
+            out.append((k.vx, k.vy))
+        self.assertEqual(out[0], out[1])
+
+    def test_traits_help_only_on_their_surface(self):
+        keys = [c["key"] for c in CHARACTERS]
+        tux, gopher, mona = keys.index("tux"), keys.index("gopher"), keys.index("mona")
+        frost = Geometry(TRACKS[2])
+        meadow = Geometry(TRACKS[0])
+
+        def slide(char, geo):
+            k = Kart(0, char, CHARACTERS[char]["stats"], geo, 0, CHARACTERS[char].get("trait"))
+            h = k.heading
+            k.vx, k.vy = math.cos(h) * 60 - math.sin(h) * 30, math.sin(h) * 60 + math.cos(h) * 30
+            k.drive(0.1, 0, False, False)
+            return abs(-k.vx * math.sin(k.heading) + k.vy * math.cos(k.heading))
+        self.assertLess(slide(tux, frost), slide(mona, frost))      # grips the ice
+        self.assertAlmostEqual(slide(tux, meadow), slide(mona, meadow), places=6)
+
+        def grass_top(char):
+            k = Kart(0, char, CHARACTERS[char]["stats"], meadow, 0, CHARACTERS[char].get("trait"))
+            k.surface = 2
+            x, y = k.x, k.y
+            for _ in range(200):
+                k.drive(0.05, 0, False, False)
+                k.x, k.y = x, y                  # stay put; only the speed matters
+            return k.forward_speed()
+        self.assertGreater(grass_top(gopher), grass_top(mona) + 5)
+
+
+class PhysicsTests(unittest.TestCase):
+    def setUp(self):
+        self.g = Geometry(TRACKS[0])
+
+    def kart(self, char=0):
+        return Kart(0, char, CHARACTERS[char]["stats"], self.g, 0)
+
+    def test_accelerates_to_top_speed_on_the_road(self):
+        k = self.kart()
+        for _ in range(240):
+            k.drive(1 / 60, 0, False, False)
+            k.locate(0, 1 / 60)
+            k.x, k.y = self.g.place(k.idx, 0)   # keep it on the centre line
+            k.heading = self.g.heading_at(k.idx)
+        self.assertGreater(k.forward_speed(), k.top * 0.9)
+
+    def test_heavier_characters_have_higher_top_speed(self):
+        tops = [Kart(0, i, c["stats"], self.g, 0).top for i, c in enumerate(CHARACTERS)]
+        self.assertEqual(max(tops), Kart(0, 2, CHARACTERS[2]["stats"], self.g, 0).top)
+
+    def test_drift_charges_and_releases_into_a_boost(self):
+        k = self.kart()
+        k.vx, k.vy = math.cos(k.heading) * 80, math.sin(k.heading) * 80
+        events = []
+        for _ in range(int((DRIFT_LEVELS[1] + 0.2) * 60)):
+            events += k.drive(1 / 60, 1.0, False, True)
+            k.vx, k.vy = math.cos(k.heading) * 80, math.sin(k.heading) * 80
+        self.assertIn("drift", events)
+        self.assertIn("drift2", events)
+        events = k.drive(1 / 60, 1.0, False, False)
+        self.assertIn("boost", events)
+        self.assertGreater(k.boost, 0.8)
+
+    def test_shield_absorbs_one_hit(self):
+        k = self.kart()
+        k.shield = 3.0
+        self.assertEqual(k.hit(), "shield")
+        self.assertEqual(k.spin, 0)
+        self.assertEqual(k.hit(), "spin")
+        self.assertGreater(k.spin, 0)
+
+    def test_spinning_ignores_input(self):
+        k = self.kart()
+        k.vx, k.vy = math.cos(k.heading) * 60, math.sin(k.heading) * 60
+        k.hit()
+        before = k.forward_speed()
+        k.drive(0.2, 1.0, False, True)
+        self.assertEqual(k.drift, 0)
+        self.assertLess(math.hypot(k.vx, k.vy), before)
+
+
+class LapTests(unittest.TestCase):
+    def test_laps_count_forward_and_not_backward(self):
+        g = Geometry(TRACKS[0])
+        k = Kart(0, 0, CHARACTERS[0]["stats"], g, 0)
+        now = 0
+        laps = []
+        for lap in range(2):
+            for i in range(g.count):
+                k.x, k.y = g.place(i, 0)
+                now += 50
+                laps += k.locate(now, 0.05)
+        self.assertEqual(k.lap, 2)
+        self.assertEqual(laps.count("lap"), 2)
+        # drive on a little, then backwards over the line: the lap is taken away
+        for i in range(0, 10):
+            k.x, k.y = g.place(i, 0)
+            k.locate(now, 0.05)
+        self.assertEqual(k.lap, 3)
+        for i in range(10, -10, -1):
+            k.x, k.y = g.place(i % g.count, 0)
+            k.locate(now, 0.05)
+        self.assertEqual(k.lap, 2)
+
+    def test_cutting_across_the_infield_gains_nothing_and_respawns(self):
+        g = Geometry(TRACKS[0])
+        k = Kart(0, 0, CHARACTERS[0]["stats"], g, 0)
+        for i in range(0, 30):
+            k.x, k.y = g.place(i, 0)
+            k.locate(0, 0.05)
+        start = k.idx
+        far = g.place(start + g.count // 2, 0)       # the other side of the lap
+        k.x, k.y = (k.x + far[0]) / 2, (k.y + far[1]) / 2  # middle of the infield
+        events = []
+        for _ in range(70):
+            events += k.locate(0, 0.05)
+        moved = (k.idx - start + g.count // 2) % g.count - g.count // 2
+        self.assertLessEqual(moved, 30)
+        self.assertIn("respawn", events)
+
+    def test_lava_drops_the_kart_and_puts_it_back_on_the_road(self):
+        g = Geometry(TRACKS[3])
+        self.assertTrue(g.drop)
+        k = Kart(0, 0, CHARACTERS[0]["stats"], g, 0)
+        k.x, k.y = g.place(k.idx, g.road + g.curb + 6)
+        self.assertIn("fall", k.locate(0, 0.05))
+        events = []
+        for _ in range(100):
+            events += k.drive(0.05, 0, False, False)
+            if "respawn" in events:
+                break
+        self.assertIn("respawn", events)
+        self.assertEqual(g.surface(g.nearest(k.x, k.y, k.idx)[2]), ROAD)
+
+
+class ItemTests(unittest.TestCase):
+    def test_bug_spins_others_but_not_its_owner_at_first(self):
+        g = Geometry(TRACKS[0])
+        items = Items(g, Rng(1))
+        a = Kart(0, 0, CHARACTERS[0]["stats"], g, 0)
+        b = Kart(1, 1, CHARACTERS[1]["stats"], g, 1)
+        items.bugs.append(Bug(a.x, a.y, a.id))
+        events = []
+        items.step(0.01, [a], lambda k: 0, events)
+        self.assertEqual(a.spin, 0)
+        b.x, b.y = items.bugs[0].x, items.bugs[0].y
+        items.step(0.01, [b], lambda k: 0, events)
+        self.assertGreater(b.spin, 0)
+        self.assertEqual(items.bugs, [])
+
+    def test_force_push_hits_only_karts_ahead(self):
+        g = Geometry(TRACKS[0])
+        items = Items(g, Rng(1))
+        karts = [Kart(i, i, CHARACTERS[i]["stats"], g, i) for i in range(4)]
+        karts[3].item = PUSH
+        ranks = {0: 0, 1: 1, 2: 2, 3: 3}
+        items.use(karts[3], karts, lambda k: ranks[k.id], [])
+        self.assertTrue(all(k.spin > 0 for k in karts[:3]))
+        self.assertEqual(karts[3].spin, 0)
+
+
+class RaceTests(unittest.TestCase):
+    def test_countdown_announces_three_two_one_go(self):
+        r = Race(TRACKS[0], [Entrant(0, HUMAN)], seed=1)
+        seen = []
+        while r.phase == COUNTDOWN:
+            r.step(1 / 30, {})
+            seen += [(e, n) for e, _k, n in r.events if e in ("count", "go")]
+        self.assertEqual(seen, [("count", 3), ("count", 2), ("count", 1), ("go", None)])
+        self.assertEqual(r.phase, RACING)
+
+    def test_karts_cannot_move_during_the_countdown(self):
+        r = Race(TRACKS[0], [Entrant(i, CPU) for i in range(4)], seed=2)
+        start = [(k.x, k.y) for k in r.karts]
+        for _ in range(60):
+            r.step(1 / 30, {})
+        self.assertEqual(start, [(k.x, k.y) for k in r.karts])
+
+    def test_every_track_finishes_and_is_deterministic(self):
+        for ti, spec in enumerate(TRACKS):
+            results = []
+            for _ in range(2):
+                r = Race(spec, [Entrant(i, CPU) for i in range(4)], seed=99)
+                while r.clock_ms < 150000 and len(r.finish_order) < 4:
+                    r.step(1 / 30, {})
+                results.append(r.results())
+            self.assertEqual(len(r.finish_order), 4, spec["name"])
+            self.assertEqual(results[0], results[1], spec["name"])
+
+    def test_standings_put_finishers_first_in_finishing_order(self):
+        r = Race(TRACKS[0], [Entrant(i, CPU) for i in range(4)], seed=5)
+        r.karts[2].finished_ms = 50000
+        r.karts[0].finished_ms = 51000
+        r.karts[1].lap, r.karts[3].lap = 3, 2
+        order = [k.id for k in r.standings()]
+        self.assertEqual(order[:2], [2, 0])
+        self.assertEqual(order[2:], [1, 3])
+
+
+class ReviewRegressionTests(unittest.TestCase):
+    """Findings from the Codex review, kept fixed."""
+
+    def test_finalize_places_every_kart_once_even_if_it_finishes_later(self):
+        r = Race(TRACKS[0], [Entrant(i, CPU) for i in range(4)], seed=3)
+        r.karts[1].finished_ms = 40000
+        r.finish_order.append(1)
+        order = r.finalize()
+        self.assertEqual(sorted(order), [0, 1, 2, 3])
+        # a DNF kart crossing the line afterwards must not be placed again
+        k = r.karts[2]
+        self.assertTrue(k.dnf)
+        k.lap = r.laps
+        g = r.geo
+        for i in list(range(g.count - 5, g.count)) + [0, 1]:
+            k.x, k.y = g.place(i, 0)
+            for e in k.locate(50000, 0.05):
+                if e == "lap" and k.lap > r.laps and k.finished_ms is None and not k.dnf:
+                    r.finish(k, 50000)
+        self.assertEqual(len(r.finish_order), 4)
+
+    def test_ghost_is_recorded_only_for_time_trials(self):
+        quick = Race(TRACKS[0], [Entrant(0, HUMAN)], seed=1)
+        trial = Race(TRACKS[0], [Entrant(0, HUMAN)], seed=1, items=False, record_ghost=True)
+        for r in (quick, trial):
+            for _ in range(200):
+                r.step(1 / 30, {})
+        self.assertEqual(quick.ghost, [])
+        self.assertGreater(len(trial.ghost), 10)
+
+    def test_reversing_over_the_line_voids_the_lap_time(self):
+        g = Geometry(TRACKS[0])
+        k = Kart(0, 0, CHARACTERS[0]["stats"], g, 0)
+        now = 0
+        for i in list(range(g.count - 5, g.count)) + list(range(0, 6)):
+            k.x, k.y = g.place(i % g.count, 0)
+            now += 50
+            k.locate(now, 0.05)
+        for i in range(5, -6, -1):          # back over the line
+            k.x, k.y = g.place(i % g.count, 0)
+            now += 50
+            k.locate(now, 0.05)
+        for i in range(-5, 6):              # and forward again, a few metres later
+            k.x, k.y = g.place(i % g.count, 0)
+            now += 50
+            k.locate(now, 0.05)
+        self.assertIsNone(k.best_lap_ms)
+
+
+class OrderingTests(unittest.TestCase):
+    """MicroPython's sort is not stable, so orders must not depend on input order."""
+
+    def test_cup_ties_go_to_the_better_last_race_then_index(self):
+        from race import cup_order
+        totals = {0: 30, 1: 22, 2: 30, 3: 18}
+        self.assertEqual(cup_order(totals, [2, 1, 0, 3], 4), [2, 0, 1, 3])
+        self.assertEqual(cup_order(totals, [0, 2, 1, 3], 4), [0, 2, 1, 3])
+        self.assertEqual(cup_order({}, [], 4), [0, 1, 2, 3])
+
+    def test_standings_do_not_depend_on_kart_list_order(self):
+        r = Race(TRACKS[0], [Entrant(i, CPU) for i in range(4)], seed=5)
+        for k in r.karts:
+            k.lap, k.idx, k.t = 1, 10, 0.0          # all tied on progress
+        r.karts[3].finished_ms = r.karts[1].finished_ms = 40000   # tied finish
+        want = [k.id for k in r.standings()]
+        rng = Rng(9)
+        for _ in range(20):
+            shuffled = list(r.karts)
+            for i in range(len(shuffled) - 1, 0, -1):
+                j = rng.randrange(i + 1)
+                shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+            r.karts = shuffled
+            self.assertEqual([k.id for k in r.standings()], want)
+        self.assertEqual(want[:2], [1, 3])
+
+
+class ReviewRound2Tests(unittest.TestCase):
+    def test_race_clock_does_not_depend_on_frame_rate(self):
+        times = []
+        for fps in (30, 60, 45):
+            r = Race(TRACKS[0], [Entrant(0, HUMAN)], seed=1)
+            for _ in range(fps * 13):              # 3 s countdown + 10 s racing
+                r.step(1.0 / fps, {})
+            times.append(r.clock_ms)
+        self.assertTrue(max(times) - min(times) <= 2, times)
+
+    def test_time_after_go_is_not_thrown_away(self):
+        a = Race(TRACKS[0], [Entrant(0, HUMAN)], seed=1)
+        b = Race(TRACKS[0], [Entrant(0, HUMAN)], seed=1)
+        a.step(2.98, {})
+        b.step(2.98, {})
+        a.step(0.05, {})                          # crosses GO 30 ms early
+        for _ in range(2):
+            b.step(0.02, {})
+        b.step(0.01, {})
+        self.assertEqual(a.clock_ms, b.clock_ms)
+        self.assertAlmostEqual(a.karts[0].x, b.karts[0].x, delta=0.5)
+
+    def test_finish_order_is_canonical_with_dnfs_and_late_results(self):
+        r = Race(TRACKS[0], [Entrant(i, CPU) for i in range(4)], seed=2)
+        r.karts[3].dnf = True
+        r.finish_order.append(3)                  # a badge left first
+        r.karts[2].finished_ms = 52000
+        r.finish_order.append(2)                  # a slower result arrived first
+        r.finish(r.karts[1], 50000)
+        self.assertEqual(r.finish_order, [1, 2, 3])
+        self.assertEqual(r.finalize(), [1, 2, 0, 3])
+
+    def test_departed_karts_drop_behind_active_ones(self):
+        r = Race(TRACKS[0], [Entrant(i, CPU) for i in range(3)], seed=2)
+        r.karts[0].lap = 2
+        r.karts[0].dnf = r.karts[0].gone = True
+        self.assertEqual(r.standings()[-1].id, 0)
+
+
+class PartyPacketTests(unittest.TestCase):
+    """Anyone on the network can send packets; junk must be dropped, not crash."""
+
+    def party(self):
+        import party as party_mod
+        p = object.__new__(party_mod.Party)
+        p.id = 5
+
+        class G:
+            pass
+        p.game = G()
+        p.game.race = Race(TRACKS[0], [Entrant(0, HUMAN), Entrant(1, REMOTE_KIND)], seed=1)
+        p.owner = {0: 5, 1: 9}
+        p.members = {5, 9}
+        p.race_id = 77
+        p.remote = {}
+        p.last_seq = {}
+        p.seen = {}
+        return p
+
+    def test_bad_hello_never_reaches_the_tables(self):
+        p = self.party()
+        p.addr_of, p.peers = {}, {}
+        for bad in ({"id": 9, "t": "hi", "c": "x", "tr": 0, "ms": 1},
+                    {"id": 9, "t": "hi", "c": 0, "tr": 0, "ms": 1e999},
+                    {"id": 9, "t": "hi", "c": 99, "tr": 0, "ms": 1}):
+            with self.assertRaises((ValueError, TypeError, OverflowError)):
+                p.parse_hello(bad)
+        self.assertEqual(p.peers, {})
+
+    def test_clock_offset_compensates_for_delay(self):
+        p = self.party()
+        p.sync, p.peers = {}, {}
+
+        class Now:
+            pass
+        sent = []
+        p.send = lambda m: sent.append(m)
+        p.game.now = 1100                         # pong arrives 100 ms after the ping
+        p.handle_lobby({"id": 9, "t": "po", "to": 5, "q": 1000, "h": 5050})
+        # host read 5050 halfway through the trip, at our 1050: offset 4000
+        self.assertEqual(p.sync[9], (100, 4000))
+
+    def test_badge_ids_are_bound_to_their_first_address(self):
+        p = self.party()
+        p.addr_of = {}
+        self.assertFalse(p.trusted({"id": 9, "t": "st"}, ("10.0.0.9", 1)))   # no hello yet
+        self.assertTrue(p.trusted({"id": 9, "t": "hi"}, ("10.0.0.9", 1)))
+        self.assertTrue(p.trusted({"id": 9, "t": "st"}, ("10.0.0.9", 1)))
+        self.assertFalse(p.trusted({"id": 9, "t": "st"}, ("10.0.0.66", 1)))  # spoofed
+        self.assertFalse(p.trusted({"id": 5, "t": "hi"}, ("10.0.0.66", 1)))  # our own id
+
+    def test_stale_and_foreign_state_packets_are_dropped(self):
+        p = self.party()
+        entry = [1, 100.0, 100.0, 0.5, 10.0, 0.0, 1, 5, 0.5, 0, 0, None]
+        p.handle_race({"id": 9, "t": "st", "r": 77, "s": 10, "k": [entry]}, 0)
+        self.assertEqual(p.remote[1][0][1], 100.0)
+        old = [1, 50.0] + entry[2:]
+        p.handle_race({"id": 9, "t": "st", "r": 77, "s": 9, "k": [old]}, 1)      # reordered
+        p.handle_race({"id": 9, "t": "st", "r": 76, "s": 11, "k": [old]}, 1)     # older race
+        p.handle_race({"id": 8, "t": "st", "r": 77, "s": 12, "k": [old]}, 1)     # not a member
+        self.assertEqual(p.remote[1][0][1], 100.0)
+
+    def test_start_messages_are_validated(self):
+        p = self.party()
+        good = {"id": 3, "ids": [3, 5], "chars": [0, 1], "cpus": [2], "tr": 1, "seed": 7,
+                "race": 42, "at": 1000}
+        self.assertIsNotNone(p.check_start(good))
+        for bad in ({**good, "ids": [3]}, {**good, "chars": [0]}, {**good, "tr": 9},
+                    {**good, "chars": [0, 99]}, {**good, "ids": [3, 3]}, {**good, "id": 5},
+                    {**good, "cpus": [0, 1, 2]}):
+            self.assertIsNone(p.check_start(bad), bad)
+        with self.assertRaises((ValueError, TypeError, KeyError)):
+            p.check_start({**good, "ids": "xx"})
+
+    def test_only_the_owner_may_move_a_kart(self):
+        p = self.party()
+        entry = [1, 100.0, 100.0, 0.5, 10.0, 0.0, 1, 5, 0.5, 0, 0, None]
+        self.assertIsNotNone(p.check_state(entry, 9))
+        self.assertIsNone(p.check_state(entry, 7))           # not the owner
+        self.assertIsNone(p.check_state([0] + entry[1:], 9))  # someone else's kart
+        self.assertIsNone(p.check_state(entry[:5], 9))
+        self.assertIsNone(p.check_state([1, 9999.0] + entry[2:], 9))
+
+
+if __name__ == "__main__":
+    unittest.main()
