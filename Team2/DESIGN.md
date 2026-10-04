@@ -68,8 +68,13 @@ alternative after a slash, for example "BK/<".
 Steering assist (on by default, can be turned off) nudges the kart back toward
 the road when no direction is held. Tilt steering is an option.
 
-**Characters** (speed, acceleration, handling, weight; each sums to 12):
-Mona 3/3/3/3, Cluck 2/5/3/2, Sciuri 4/2/2/4, Buzz 3/2/5/2.
+**Characters** (speed, acceleration, handling, weight; 12 points, or 11 with
+a trait): Mona 3/3/3/3, Cluck 2/5/3/2, Sciuri 4/2/2/4, Buzz 3/2/5/2, Tux
+2/3/3/3 with better grip on ice. Unlockable open-source mascots give the cup a
+reason to be replayed: Ferris 2/3/2/5 (finish any cup), Gopher 3/4/2/2 with
+less off-road slowdown (win on Easy), Duke 4/3/3/2 (win on Normal) and the
+Android robot 3/3/2/4 (a time trial record on every track). Each was checked
+for a licence that allows modified use (credits in README and Settings).
 
 **Tracks** (Octo Cup, in order): Octocat Meadow (wide, grass), Merge Conflict
 Canyon (narrow, deep sand, boost pads), Frost Fork (ice road, low grip, night

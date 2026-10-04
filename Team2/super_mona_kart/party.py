@@ -20,6 +20,7 @@ from config import CHARACTERS, TRACKS, BUG, PUSH
 from race import Race, Entrant, HUMAN, CPU, REMOTE, COUNTDOWN_MS
 from lights import LOBBY, OFF
 from controls import chord
+from progress import unlocked
 import ui
 from ui import W, H, center, panel, prompt
 
@@ -200,10 +201,11 @@ class Party:
         else:
             center("Waiting for the host to start...", 164, a.small, ui.DIM)
             prompt([("<>", "racer"), ("BK/^v", "leave")], H - 18, a.small)
-        if badge.pressed(BUTTON_LEFT):
-            self.char = (self.char - 1) % len(CHARACTERS)
-        elif badge.pressed(BUTTON_RIGHT):
-            self.char = (self.char + 1) % len(CHARACTERS)
+        free = unlocked(g.save)
+        step = -1 if badge.pressed(BUTTON_LEFT) else (1 if badge.pressed(BUTTON_RIGHT) else 0)
+        if step:
+            at = free.index(self.char) if self.char in free else 0
+            self.char = free[(at + step) % len(free)]
         if host:
             held = badge.held()
             both = BUTTON_UP in held and BUTTON_DOWN in held

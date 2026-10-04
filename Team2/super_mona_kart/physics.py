@@ -32,10 +32,11 @@ def wrap(a):
 
 
 class Kart:
-    def __init__(self, kid, char, stats, geo, slot):
+    def __init__(self, kid, char, stats, geo, slot, trait=None):
         self.id = kid
         self.char = char
         self.geo = geo
+        self.trait = trait      # "ice" or "offroad", see config.CHARACTERS
         speed, accel, handling, weight = stats
         self.top = 84.0 + 4.0 * speed
         self.accel = 40.0 + 8.0 * accel
@@ -142,10 +143,13 @@ class Kart:
         if surf == CURB:
             top *= 0.93
         elif surf == OFF:
-            top = min(top, geo.spec.get("off", 40.0))
+            top = min(top, geo.spec.get("off", 40.0) + (10.0 if self.trait == "offroad" else 0.0))
             grip *= 0.85
-        if geo.on_patch(self.x, self.y):
+        on_ice = geo.on_patch(self.x, self.y)
+        if on_ice:
             grip *= 0.45
+        if self.trait == "ice" and (on_ice or grip < 1.0):
+            grip = min(1.0, grip * 1.35)
         if self.boost > 0:
             top *= BOOST_TOP
 

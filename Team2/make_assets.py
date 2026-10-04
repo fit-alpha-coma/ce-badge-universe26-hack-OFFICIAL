@@ -157,7 +157,7 @@ def rider_back(key, ch):
         d.polygon(((19, 8), (19, 2), (16, 6)), fill=b2)
         d.ellipse((8, 12, 21, 22), fill=b)
         img = outline(img)
-    else:  # buzz
+    elif key == "buzz":
         y, k = (246, 196, 34, 255), (40, 30, 24, 255)
         d.ellipse((2, 4, 13, 13), fill=(236, 246, 255, 200))     # wings
         d.ellipse((18, 4, 29, 13), fill=(236, 246, 255, 200))
@@ -167,7 +167,151 @@ def rider_back(key, ch):
         d.line(((13, 6), (11, 1)), fill=k)
         d.line(((18, 6), (20, 1)), fill=k)
         img = outline(img)
+    else:
+        img = Image.new("RGBA", (CELL, CELL), CLEAR)
+        img.alpha_composite(eco("back", key), (4, 0))
     return img
+
+
+# --- open-source mascots, drawn here as original pixel art --------------------
+# Tux (Linux, Larry Ewing), Ferris (Rust, CC0), the Go gopher (Renee French,
+# CC BY 4.0), Duke (Java, BSD) and the Android robot (Google, CC BY 3.0).
+# 24x24, rider sits with its lower rows hidden by the kart.
+
+BLACKISH = (22, 22, 28, 255)
+WHITE = (246, 246, 240, 255)
+
+
+def eco(view, key):
+    img = Image.new("RGBA", (24, 24), CLEAR)
+    d = ImageDraw.Draw(img)
+    if key == "tux":
+        beak = (250, 186, 32, 255)
+        if view == "front":
+            d.ellipse((5, 8, 18, 24), fill=BLACKISH)
+            d.ellipse((8, 11, 15, 24), fill=WHITE)
+            d.ellipse((6, 0, 17, 12), fill=BLACKISH)
+            d.ellipse((8, 3, 15, 10), fill=WHITE)
+            d.point((10, 5), fill=BLACKISH)
+            d.point((13, 5), fill=BLACKISH)
+            d.polygon(((9, 7), (14, 7), (11, 10)), fill=beak)
+            d.polygon(((3, 12), (6, 10), (6, 18)), fill=BLACKISH)
+            d.polygon(((20, 12), (17, 10), (17, 18)), fill=BLACKISH)
+        elif view == "side":
+            d.ellipse((5, 8, 18, 24), fill=BLACKISH)
+            d.ellipse((11, 11, 17, 24), fill=WHITE)
+            d.ellipse((6, 0, 17, 12), fill=BLACKISH)
+            d.ellipse((12, 3, 16, 9), fill=WHITE)
+            d.point((14, 5), fill=BLACKISH)
+            d.polygon(((16, 6), (21, 7), (16, 9)), fill=beak)
+            d.polygon(((7, 12), (10, 11), (5, 19)), fill=(50, 50, 58, 255))
+        else:
+            d.ellipse((5, 8, 18, 24), fill=BLACKISH)
+            d.ellipse((6, 0, 17, 12), fill=BLACKISH)
+            d.polygon(((3, 12), (6, 10), (6, 18)), fill=BLACKISH)
+            d.polygon(((20, 12), (17, 10), (17, 18)), fill=BLACKISH)
+            d.ellipse((8, 2, 12, 5), fill=(70, 70, 82, 255))
+    elif key == "ferris":
+        o, o2 = (247, 80, 20, 255), (196, 52, 10, 255)
+        if view == "front":
+            for x in (4, 8, 15, 19):
+                d.line(((x, 18), (x - 1 if x < 12 else x + 1, 22)), fill=o2, width=1)
+            d.ellipse((2, 10, 21, 21), fill=o)
+            d.line(((8, 10), (8, 5)), fill=o2)
+            d.line(((15, 10), (15, 5)), fill=o2)
+            d.ellipse((6, 2, 10, 6), fill=WHITE)
+            d.ellipse((13, 2, 17, 6), fill=WHITE)
+            d.point((8, 4), fill=BLACKISH)
+            d.point((15, 4), fill=BLACKISH)
+            d.arc((8, 13, 15, 18), 20, 160, fill=BLACKISH)
+            d.pieslice((0, 4, 6, 11), 200, 520, fill=o)      # claws up
+            d.pieslice((17, 4, 23, 11), 20, 340, fill=o)
+        elif view == "side":
+            d.ellipse((2, 11, 18, 21), fill=o)
+            d.line(((13, 11), (14, 5)), fill=o2)
+            d.ellipse((12, 2, 16, 6), fill=WHITE)
+            d.point((15, 4), fill=BLACKISH)
+            d.pieslice((15, 8, 23, 15), 300, 610, fill=o)      # claw forward
+            for x in (5, 9, 13):
+                d.line(((x, 20), (x - 2, 23)), fill=o2)
+        else:
+            d.ellipse((2, 9, 21, 21), fill=o)
+            for x in range(4, 21, 4):                           # sprocket bumps
+                d.rectangle((x, 8, x + 1, 9), fill=o2)
+            d.pieslice((0, 4, 6, 11), 200, 520, fill=o)
+            d.pieslice((17, 4, 23, 11), 20, 340, fill=o)
+            d.ellipse((8, 12, 15, 17), fill=(255, 130, 70, 255))
+    elif key == "gopher":
+        b, b2, tan = (106, 215, 229, 255), (70, 170, 190, 255), (240, 214, 170, 255)
+        if view == "front":
+            d.ellipse((5, 4, 18, 24), fill=b)
+            d.ellipse((5, 2, 8, 5), fill=b2)
+            d.ellipse((15, 2, 18, 5), fill=b2)
+            d.ellipse((6, 5, 11, 10), fill=WHITE)
+            d.ellipse((12, 5, 17, 10), fill=WHITE)
+            d.point((9, 8), fill=BLACKISH)
+            d.point((14, 8), fill=BLACKISH)
+            d.ellipse((9, 10, 14, 13), fill=tan)
+            d.point((11, 10), fill=BLACKISH)
+            d.rectangle((11, 13, 12, 14), fill=WHITE)
+            d.ellipse((2, 13, 6, 17), fill=tan)
+            d.ellipse((17, 13, 21, 17), fill=tan)
+        elif view == "side":
+            d.ellipse((5, 4, 18, 24), fill=b)
+            d.ellipse((7, 2, 10, 5), fill=b2)
+            d.ellipse((11, 5, 16, 10), fill=WHITE)
+            d.point((14, 8), fill=BLACKISH)
+            d.ellipse((15, 10, 20, 13), fill=tan)
+            d.point((19, 10), fill=BLACKISH)
+            d.rectangle((17, 13, 18, 14), fill=WHITE)
+            d.ellipse((13, 14, 17, 18), fill=tan)
+        else:
+            d.ellipse((5, 4, 18, 24), fill=b)
+            d.ellipse((5, 2, 8, 5), fill=b2)
+            d.ellipse((15, 2, 18, 5), fill=b2)
+            d.ellipse((9, 18, 14, 22), fill=b2)                # little tail
+    elif key == "duke":
+        red = (226, 28, 40, 255)
+        if view == "front":
+            d.polygon(((12, 0), (20, 20), (4, 20)), fill=BLACKISH)
+            d.ellipse((4, 12, 20, 24), fill=BLACKISH)
+            d.polygon(((12, 9), (17, 21), (7, 21)), fill=WHITE)
+            d.ellipse((9, 9, 15, 15), fill=red)
+            d.ellipse((10, 10, 12, 12), fill=(255, 140, 140, 255))
+            d.line(((5, 15), (0, 10)), fill=BLACKISH, width=2)  # a wave
+            d.line(((19, 15), (23, 18)), fill=BLACKISH, width=2)
+        elif view == "side":
+            d.polygon(((10, 0), (18, 20), (4, 20)), fill=BLACKISH)
+            d.ellipse((4, 12, 18, 24), fill=BLACKISH)
+            d.polygon(((13, 9), (17, 21), (11, 21)), fill=WHITE)
+            d.ellipse((15, 9, 21, 15), fill=red)
+        else:
+            d.polygon(((12, 0), (20, 20), (4, 20)), fill=BLACKISH)
+            d.ellipse((4, 12, 20, 24), fill=BLACKISH)
+            d.line(((5, 15), (0, 10)), fill=BLACKISH, width=2)
+            d.line(((19, 15), (23, 18)), fill=BLACKISH, width=2)
+    else:  # android robot
+        g = (61, 220, 132, 255)
+        if view in ("front", "back"):
+            d.line(((8, 4), (6, 1)), fill=g)
+            d.line(((15, 4), (17, 1)), fill=g)
+            d.pieslice((5, 3, 18, 15), 180, 360, fill=g)
+            if view == "front":
+                d.point((9, 6), fill=WHITE)
+                d.point((14, 6), fill=WHITE)
+            d.rounded_rectangle((5, 10, 18, 21), 2, fill=g)
+            d.rounded_rectangle((1, 10, 4, 18), 2, fill=g)
+            d.rounded_rectangle((19, 10, 22, 18), 2, fill=g)
+            d.rectangle((8, 21, 9, 23), fill=g)
+            d.rectangle((14, 21, 15, 23), fill=g)
+        else:
+            d.line(((12, 4), (14, 1)), fill=g)
+            d.pieslice((5, 3, 18, 15), 180, 360, fill=g)
+            d.point((15, 6), fill=WHITE)
+            d.rounded_rectangle((5, 10, 18, 21), 2, fill=g)
+            d.rounded_rectangle((10, 10, 13, 18), 2, fill=(40, 180, 100, 255))
+            d.rectangle((9, 21, 11, 23), fill=g)
+    return outline(img)
 
 
 def place_rider(canvas, rider, bottom=23):
@@ -479,12 +623,17 @@ def main():
              "buzz": bee_side[0].resize((24, 24), Image.NEAREST)}
     fronts = {"mona": mona[5], "cluck": chick[5], "sciuri": squirrel[0],
               "buzz": bee_front[0].resize((24, 24), Image.NEAREST)}
+    for key in ("tux", "ferris", "gopher", "duke", "droid"):
+        sides[key] = eco("side", key)
+        fronts[key] = eco("front", key)
     for ch in config.CHARACTERS:
         sheet = kart_sheet(ch, sides[ch["key"]], fronts[ch["key"]])
         sheet.save(OUT / ("kart_%s.png" % ch["key"]))
         sheet.resize((sheet.width // 2, sheet.height // 2), Image.LANCZOS).save(
             OUT / ("kart_%s_half.png" % ch["key"]))
-    portraits([mona[0], chick[5], squirrel[0], bee_front[0].resize((24, 24), Image.NEAREST)],
+    faces = {"mona": mona[0], "cluck": chick[5], "sciuri": squirrel[0],
+             "buzz": bee_front[0].resize((24, 24), Image.NEAREST)}
+    portraits([faces.get(ch["key"]) or fronts[ch["key"]] for ch in config.CHARACTERS],
               None).save(OUT / "portraits.png")
     item_box_sheet().save(OUT / "box.png")
     bug_sprite().save(OUT / "bug.png")

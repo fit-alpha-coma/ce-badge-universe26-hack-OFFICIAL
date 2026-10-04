@@ -60,9 +60,23 @@ class TrackTests(unittest.TestCase):
 
 
 class FairnessTests(unittest.TestCase):
-    def test_character_stats_sum_to_the_same_total(self):
-        totals = {sum(c["stats"]) for c in CHARACTERS}
-        self.assertEqual(totals, {12})
+    def test_character_stats_trade_off_evenly(self):
+        # 12 points, or 11 for a racer whose trait is worth the twelfth
+        for c in CHARACTERS:
+            want = 11 if c.get("trait") else 12
+            self.assertEqual(sum(c["stats"]), want, c["name"])
+            self.assertTrue(all(1 <= v <= 5 for v in c["stats"]), c["name"])
+        keys = [c["key"] for c in CHARACTERS]
+        self.assertEqual(len(keys), len(set(keys)))
+
+    def test_every_racer_has_art_and_credit_where_needed(self):
+        assets = Path(__file__).resolve().parent / "super_mona_kart" / "assets"
+        for c in CHARACTERS:
+            self.assertTrue((assets / ("kart_%s.png" % c["key"])).is_file(), c["key"])
+            self.assertTrue((assets / ("kart_%s_half.png" % c["key"])).is_file(), c["key"])
+        credits = " ".join(config.CREDITS)
+        for name in ("Larry Ewing", "Renee French", "BSD", "Creative Commons 3.0 Attribution"):
+            self.assertIn(name, credits)
 
     def test_leader_never_gets_attack_or_comeback_items(self):
         rng = Rng(3)
@@ -79,6 +93,59 @@ class FairnessTests(unittest.TestCase):
     def test_points_reward_winning(self):
         self.assertEqual(list(POINTS), sorted(POINTS, reverse=True))
         self.assertEqual(award_points([2, 0, 1, 3], {}), {2: 10, 0: 7, 1: 5, 3: 3})
+
+
+class RosterTests(unittest.TestCase):
+    def test_unlocks_follow_their_goals(self):
+        from progress import unlocked, newly_unlocked, starters
+        save = {"unlocked": [], "cups": {}, "tt_best": {}}
+        self.assertEqual(sorted(CHARACTERS[i]["key"] for i in unlocked(save)), sorted(starters()))
+        self.assertIn("tux", starters())
+        self.assertEqual(newly_unlocked(save), [])
+        save["cup_done"] = True
+        self.assertEqual(newly_unlocked(save), ["Ferris"])
+        save["cups"] = {"0": 1, "1": 2}
+        self.assertEqual(newly_unlocked(save), ["Gopher"])          # Normal was not won
+        save["tt_best"] = {t["key"]: 60000 for t in TRACKS}
+        self.assertEqual(newly_unlocked(save), ["Android robot"])
+        self.assertEqual(newly_unlocked(save), [])                  # only once
+
+    def test_rivals_are_three_different_unlocked_racers(self):
+        from progress import pick_rivals
+        rng = Rng(4)
+        pool = [0, 1, 2, 3, 4]
+        for player in pool:
+            for _ in range(20):
+                r = pick_rivals(player, pool, rng)
+                self.assertEqual(len(r), 3)
+                self.assertEqual(len(set(r)), 3)
+                self.assertNotIn(player, r)
+                self.assertTrue(set(r) <= set(pool))
+
+    def test_traits_help_only_on_their_surface(self):
+        keys = [c["key"] for c in CHARACTERS]
+        tux, gopher, mona = keys.index("tux"), keys.index("gopher"), keys.index("mona")
+        frost = Geometry(TRACKS[2])
+        meadow = Geometry(TRACKS[0])
+
+        def slide(char, geo):
+            k = Kart(0, char, CHARACTERS[char]["stats"], geo, 0, CHARACTERS[char].get("trait"))
+            h = k.heading
+            k.vx, k.vy = math.cos(h) * 60 - math.sin(h) * 30, math.sin(h) * 60 + math.cos(h) * 30
+            k.drive(0.1, 0, False, False)
+            return abs(-k.vx * math.sin(k.heading) + k.vy * math.cos(k.heading))
+        self.assertLess(slide(tux, frost), slide(mona, frost))      # grips the ice
+        self.assertAlmostEqual(slide(tux, meadow), slide(mona, meadow), places=6)
+
+        def grass_top(char):
+            k = Kart(0, char, CHARACTERS[char]["stats"], meadow, 0, CHARACTERS[char].get("trait"))
+            k.surface = 2
+            x, y = k.x, k.y
+            for _ in range(200):
+                k.drive(0.05, 0, False, False)
+                k.x, k.y = x, y                  # stay put; only the speed matters
+            return k.forward_speed()
+        self.assertGreater(grass_top(gopher), grass_top(mona) + 5)
 
 
 class PhysicsTests(unittest.TestCase):

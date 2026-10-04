@@ -38,7 +38,7 @@ class Race:
         self.drivers = {}
         for i, e in enumerate(entrants):
             ch = CHARACTERS[e.char]
-            k = Kart(i, e.char, ch["stats"], self.geo, grid[i])
+            k = Kart(i, e.char, ch["stats"], self.geo, grid[i], ch.get("trait"))
             k.item = 0
             self.karts.append(k)
             if e.kind == CPU:

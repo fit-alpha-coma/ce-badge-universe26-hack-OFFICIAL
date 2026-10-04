@@ -1,8 +1,11 @@
 # Game data: characters, tracks, items and scoring. Plain Python.
 
-# Characters are the mascots of the badge's own apps. Stats are
-# (speed, acceleration, handling, weight), 1 to 5, and each sums to 12 so no
-# pick is strictly better than another.
+# Characters: the mascots of the badge's own apps, then open-source mascots
+# drawn as original pixel art (credits in CREDITS below). Stats are
+# (speed, acceleration, handling, weight), 1 to 5. Each sums to 12, or to 11
+# for a racer with a trait, so no pick is strictly better than another.
+#   trait   "ice": better grip on ice; "offroad": loses less speed off the road
+#   unlock  None (available from the start) or the goal that unlocks it
 CHARACTERS = (
     {"key": "mona", "name": "Mona", "app": "Flappy", "stats": (3, 3, 3, 3),
      "body": (124, 72, 214), "trim": (236, 214, 255), "blurb": "All-rounder"},
@@ -12,6 +15,40 @@ CHARACTERS = (
      "body": (150, 92, 44), "trim": (246, 206, 150), "blurb": "Heavy and fast"},
     {"key": "buzz", "name": "Buzz", "app": "Bee Amazed", "stats": (3, 2, 5, 2),
      "body": (246, 192, 30), "trim": (44, 34, 24), "blurb": "Drift master"},
+    {"key": "tux", "name": "Tux", "app": "Linux", "stats": (2, 3, 3, 3), "trait": "ice",
+     "body": (40, 110, 230), "trim": (250, 186, 32), "blurb": "Grips on ice"},
+    {"key": "ferris", "name": "Ferris", "app": "Rust", "stats": (2, 3, 2, 5),
+     "body": (190, 60, 20), "trim": (255, 150, 90), "blurb": "Memory-safe tank",
+     "unlock": "cup"},
+    {"key": "gopher", "name": "Gopher", "app": "Go", "stats": (3, 4, 2, 2), "trait": "offroad",
+     "body": (0, 150, 200), "trim": (240, 214, 170), "blurb": "Digs through grass",
+     "unlock": "easy"},
+    {"key": "duke", "name": "Duke", "app": "Java", "stats": (4, 3, 3, 2),
+     "body": (40, 60, 130), "trim": (226, 28, 40), "blurb": "Write once, race anywhere",
+     "unlock": "normal"},
+    {"key": "droid", "name": "Android robot", "app": "Android", "stats": (3, 3, 2, 4),
+     "body": (40, 120, 80), "trim": (61, 220, 132), "blurb": "Steady and sturdy",
+     "unlock": "trials"},
+)
+
+UNLOCK_HINTS = {
+    "cup": "Finish any Octo Cup",
+    "easy": "Win the Octo Cup on Easy",
+    "normal": "Win the Octo Cup on Normal",
+    "trials": "Set a time trial record on every track",
+}
+
+# Attribution required (or courteous) for the open-source mascots.
+CREDITS = (
+    "Mona, Cluck, Sciuri and Buzz: the GitHub Universe badge apps.",
+    "Tux: based on the Linux mascot by Larry Ewing, made with The GIMP.",
+    "Ferris: based on Ferris the Rustacean by Karen Rustad Tolva (CC0).",
+    "Gopher: the Go gopher was designed by Renee French (CC BY 4.0).",
+    "Duke: the Java mascot, open-sourced by Sun under the BSD licence.",
+    "The Android robot is reproduced or modified from work created and",
+    "shared by Google and used according to terms described in the",
+    "Creative Commons 3.0 Attribution License.",
+    "Mascots appear as tributes; no endorsement is implied.",
 )
 
 # Tracks of the Octo Cup, in race order.

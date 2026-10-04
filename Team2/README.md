@@ -9,7 +9,9 @@ to create apps under `Team2/<app-name>` and to leave `badge/apps/` unchanged.
 ## Super Mona Kart (`super_mona_kart/`)
 
 The badge mascots' Grand Prix: Mona (Flappy), Cluck (Plucky Cluck), Sciuri
-(Snarky Sciuridae) and Buzz (Bee Amazed) race on four tracks in Mode 7, with
+(Snarky Sciuridae), Buzz (Bee Amazed) and Tux, plus four open-source mascots
+to unlock (Ferris, the Go gopher, Duke and the Android robot), race on four
+tracks in Mode 7, with
 drifting, items, a Grand Prix with a podium, a time trial against your ghost,
 and party races between badges over Wi-Fi. The case lights count down the
 start, glow with your drift charge and flash when you boost or get hit.
@@ -39,6 +41,31 @@ The kart accelerates by itself. HOME returns to the launcher.
   Set `WIFI_SSID` and `WIFI_PASSWORD` in the badge's `secrets.py`. A phone
   hotspot is the safest network; conference Wi-Fi often blocks badges talking
   to each other.
+
+### Racers and credits
+
+| Racer | From | Stats (spd/acc/hnd/wgt) | Unlock |
+| --- | --- | --- | --- |
+| Mona | Flappy | 3/3/3/3 | start |
+| Cluck | Plucky Cluck | 2/5/3/2 | start |
+| Sciuri | Snarky Sciuridae | 4/2/2/4 | start |
+| Buzz | Bee Amazed | 3/2/5/2 | start |
+| Tux | Linux | 2/3/3/3 + grips on ice | start |
+| Ferris | Rust | 2/3/2/5 | finish any cup |
+| Gopher | Go | 3/4/2/2 + digs through grass | win on Easy |
+| Duke | Java | 4/3/3/2 | win on Normal |
+| Android robot | Android | 3/3/2/4 | time trial record on every track |
+
+Settings > Unlock all racers (demo) opens the whole roster for a booth.
+The open-source mascots are original pixel art based on: Tux by Larry Ewing
+(made with The GIMP; use and modification permitted with acknowledgement),
+Ferris the Rustacean by Karen Rustad Tolva (CC0), the Go gopher by Renee
+French (CC BY 4.0), Duke (open-sourced by Sun under the BSD licence), and the
+Android robot, which is reproduced or modified from work created and shared by
+Google and used according to terms described in the Creative Commons 3.0
+Attribution License. Credits also appear in Settings > Credits. Git has no
+mascot character, and GitHub's other Octodex characters are left out because
+their terms restrict use.
 
 ### Files
 
