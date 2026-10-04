@@ -319,6 +319,15 @@ class PartyPacketTests(unittest.TestCase):
         p.seen = {}
         return p
 
+    def test_badge_ids_are_bound_to_their_first_address(self):
+        p = self.party()
+        p.addr_of = {}
+        self.assertFalse(p.trusted({"id": 9, "t": "st"}, ("10.0.0.9", 1)))   # no hello yet
+        self.assertTrue(p.trusted({"id": 9, "t": "hi"}, ("10.0.0.9", 1)))
+        self.assertTrue(p.trusted({"id": 9, "t": "st"}, ("10.0.0.9", 1)))
+        self.assertFalse(p.trusted({"id": 9, "t": "st"}, ("10.0.0.66", 1)))  # spoofed
+        self.assertFalse(p.trusted({"id": 5, "t": "hi"}, ("10.0.0.66", 1)))  # our own id
+
     def test_stale_and_foreign_state_packets_are_dropped(self):
         p = self.party()
         entry = [1, 100.0, 100.0, 0.5, 10.0, 0.0, 1, 5, 0.5, 0, 0, None]

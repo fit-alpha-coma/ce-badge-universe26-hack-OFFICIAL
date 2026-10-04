@@ -360,9 +360,10 @@ class Game:
         ui.heading(spec["name"], 32, a, 22)
         sub = {GP: "Race %d of %d" % (self.cup_race + 1, len(TRACKS)),
                QUICK: "Quick Race", TRIAL: "Time Trial", PARTY_MODE: "Party race"}.get(self.mode, "")
-        center(sub + "  -  %d laps" % self.race.laps, 70, a.small, ui.WHITE)
+        laps = self.race.laps
+        center("%s  -  %d lap%s" % (sub, laps, "" if laps == 1 else "s"), 70, a.small, ui.WHITE)
         prompt([("<>", "steer"), ("SEL", "item"), ("BK/^", "drift"), ("v", "brake")], H - 34, a.small)
-        prompt([("MN/^v", "pause")] if not self.party else [], H - 18, a.small)
+        prompt([("MN", "pause"), ("hold ^v", "pause")] if not self.party else [], H - 18, a.small)
         if self.party:
             self.party.before_step(0)    # keep receiving while the card shows
             if self.party.started_countdown():
@@ -426,7 +427,7 @@ class Game:
             if waited > 2500 and (everyone or waited > patience or self.mode == TRIAL):
                 finish_unfinished(r)
                 self.end_race()
-        elif (badge.pressed(BUTTON_MENU) or chord()) and not self.party:
+        elif (badge.pressed(BUTTON_MENU) or self.controls.hold_chord(dt)) and not self.party:
             self.go(PAUSE)
         if r.phase == RACING and me.finished_ms is None:
             if me.drift:

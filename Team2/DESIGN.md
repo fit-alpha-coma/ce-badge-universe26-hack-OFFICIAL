@@ -173,6 +173,16 @@ public.
 | 18 | Low | The emulator cannot tell touch from switches or simulate inversion | Accepted and documented: the game uses neither `touched()` nor `upside_down()` |
 | 19 | Low | DESIGN overstated the performance controls | Fixed in section 7 |
 
-A separate automated security review flagged that malformed party packets
-could raise and reset the badge. Fixed: every field is type- and range-checked
-and bad packets are dropped (tests added).
+Two automated security reviews of the party code:
+
+- Malformed packets could raise and reset the badge. Fixed: every field is
+  type- and range-checked and bad packets are dropped (tests added).
+- Any device could claim another badge's id, and a forged start could pull a
+  lobby into a fake race. Fixed proportionately: a badge id is bound to the
+  address of its first hello and later packets from elsewhere are dropped; a
+  start is accepted only from a host already in the lobby, naming only lobby
+  badges (tests added). A forger on the same network who also fakes source
+  addresses is out of scope for a party game with no keyboard for a shared key.
+
+In races, Up drifts and Down brakes, so the physical pause chord needs both
+held for 0.35 s; in menus it acts at once.

@@ -56,15 +56,16 @@ class Net:
                 self.errors += 1
 
     def receive(self, limit=32):
+        """Up to `limit` decoded messages as (message, sender address) pairs."""
         out = []
         for _ in range(limit):
             try:
-                data, _addr = self.sock.recvfrom(1024)
+                data, addr = self.sock.recvfrom(1024)
             except OSError:
                 break
             msg = decode(data)
             if msg is not None:
-                out.append(msg)
+                out.append((msg, addr))
         return out
 
     def close(self):

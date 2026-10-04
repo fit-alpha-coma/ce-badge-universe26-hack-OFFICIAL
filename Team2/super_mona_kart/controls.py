@@ -14,6 +14,18 @@ class Controls:
         self.tilt = False
         self.tilt_zero = 0.0
         self.steer = 0.0
+        self.chord_t = 0.0
+
+    def hold_chord(self, dt):
+        """In a race Up drifts and Down brakes, so pausing from the switches
+        needs both held for a moment: True once after 0.35 s."""
+        held = badge.held()
+        if BUTTON_UP in held and BUTTON_DOWN in held:
+            before = self.chord_t
+            self.chord_t += dt
+            return before < 0.35 <= self.chord_t
+        self.chord_t = 0.0
+        return False
 
     def calibrate(self):
         ax, ay, az, _gx, _gy, _gz = badge.imu()

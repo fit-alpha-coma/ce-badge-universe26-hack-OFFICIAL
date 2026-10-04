@@ -57,6 +57,7 @@ class Party:
         self.remote = {}         # kart index -> (validated state, receive time)
         self.last_seq = {}       # net id -> newest sequence number seen
         self.seen = {}           # net id -> last packet time during the race
+        self.addr_of = {}        # net id -> the address it first spoke from
         self.start_local = 0     # local time the countdown starts
         try:
             import secrets
@@ -123,6 +124,8 @@ class Party:
         now = self.game.now
         for pid in [p for p, d in self.peers.items() if now - d["seen"] > PEER_TIMEOUT_MS]:
             del self.peers[pid]
+            if pid not in self.members:
+                self.addr_of.pop(pid, None)
         return sorted([self.id] + list(self.peers))[:MAX_PLAYERS]
 
     def update(self, dt):
@@ -156,9 +159,9 @@ class Party:
     def lobby(self):
         g = self.game
         a = g.art
-        for msg in self.net.receive():
+        for msg, addr in self.net.receive():
             try:
-                if self.handle_lobby(msg):
+                if self.trusted(msg, addr) and self.handle_lobby(msg):
                     return      # a start message moved us to the race
             except BAD_PACKET:
                 pass            # anyone on the network can send junk; drop it
@@ -205,6 +208,22 @@ class Party:
             if badge.pressed(BUTTON_SELECT) and len(ids) >= 2:
                 self.host_start(ids)
 
+    def trusted(self, msg, addr):
+        """Bind each badge id to the address it first used; drop anything that
+        claims that id from elsewhere. There is no keyboard for a shared key,
+        so this stops casual spoofing: a forger must also fake the source
+        address on the local network."""
+        pid = msg["id"]
+        if pid == self.id:
+            return False
+        known = self.addr_of.get(pid)
+        if known is None:
+            if msg.get("t") != "hi" or len(self.addr_of) >= 4 * MAX_PLAYERS:
+                return False    # only a hello introduces a badge
+            self.addr_of[pid] = addr
+            return True
+        return known == addr
+
     def handle_lobby(self, msg):
         """Returns True when a start message began a race."""
         pid = msg["id"]
@@ -221,7 +240,13 @@ class Party:
             d["off"] = int(msg["ms"]) - self.game.now   # their clock minus ours
         elif t == "go":
             start = self.check_start(msg)
-            if start is not None and self.id in start["ids"] and start["race"] not in self.started:
+            # only a host we have heard from can start us, and only into a race
+            # whose players are all badges in our lobby
+            if start is None or pid not in self.peers or self.id not in start["ids"]:
+                return False
+            if any(i != self.id and i not in self.peers for i in start["ids"]):
+                return False
+            if start["race"] not in self.started:
                 self.begin(start)
                 return True
         return False
@@ -303,9 +328,10 @@ class Party:
         g = self.game
         r = g.race
         now = g.now
-        for msg in self.net.receive():
+        for msg, addr in self.net.receive():
             try:
-                self.handle_race(msg, now)
+                if self.trusted(msg, addr):
+                    self.handle_race(msg, now)
             except BAD_PACKET:
                 pass
         # a badge that went quiet leaves the race: its karts are out
