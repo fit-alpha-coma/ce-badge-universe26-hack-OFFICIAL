@@ -61,10 +61,12 @@ class Race:
         return [k for k in self.karts if self.entrants[k.id].kind != CPU]
 
     def standings(self):
+        # MicroPython's sort is not stable: every key ends in the kart id so
+        # ties come out the same on every badge
         def key(k):
             if k.finished_ms is not None:
-                return (0, k.finished_ms, 0)
-            return (1, 0, -k.progress())
+                return (0, k.finished_ms, 0, k.id)
+            return (1, 0, -k.progress(), k.id)
         return sorted(self.karts, key=key)
 
     def rank_of(self, kart):
@@ -219,6 +221,14 @@ def award_points(order, totals):
         if place < len(POINTS):
             totals[idx] = totals.get(idx, 0) + POINTS[place]
     return totals
+
+
+def cup_order(totals, last_order, n):
+    """Grand Prix order: most points first; a tie goes to whoever placed higher
+    in the latest race, then to the lower entrant index. A total order, because
+    MicroPython's sort is not stable."""
+    place = {idx: i for i, idx in enumerate(last_order)}
+    return sorted(range(n), key=lambda i: (-totals.get(i, 0), place.get(i, n), i))
 
 
 def finish_unfinished(race):

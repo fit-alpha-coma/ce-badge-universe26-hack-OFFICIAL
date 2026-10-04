@@ -183,6 +183,11 @@ Two automated security reviews of the party code:
   start is accepted only from a host already in the lobby, naming only lobby
   badges (tests added). A forger on the same network who also fakes source
   addresses is out of scope for a party game with no keyboard for a shared key.
+  A later review of the binding flagged the residual cases (an id squatted by
+  a device that says hello first, and forged source addresses). Accepted: the
+  Wi-Fi network is the trust boundary. Use a password-protected phone hotspot
+  for demos; on an open network the worst outcome is a disrupted party race,
+  not a crash, and single-player modes never touch the network.
 
 In races, Up drifts and Down brakes, so the physical pause chord needs both
 held for 0.35 s; in menus it acts at once.

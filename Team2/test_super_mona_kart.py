@@ -299,6 +299,33 @@ class ReviewRegressionTests(unittest.TestCase):
         self.assertIsNone(k.best_lap_ms)
 
 
+class OrderingTests(unittest.TestCase):
+    """MicroPython's sort is not stable, so orders must not depend on input order."""
+
+    def test_cup_ties_go_to_the_better_last_race_then_index(self):
+        from race import cup_order
+        totals = {0: 30, 1: 22, 2: 30, 3: 18}
+        self.assertEqual(cup_order(totals, [2, 1, 0, 3], 4), [2, 0, 1, 3])
+        self.assertEqual(cup_order(totals, [0, 2, 1, 3], 4), [0, 2, 1, 3])
+        self.assertEqual(cup_order({}, [], 4), [0, 1, 2, 3])
+
+    def test_standings_do_not_depend_on_kart_list_order(self):
+        r = Race(TRACKS[0], [Entrant(i, CPU) for i in range(4)], seed=5)
+        for k in r.karts:
+            k.lap, k.idx, k.t = 1, 10, 0.0          # all tied on progress
+        r.karts[3].finished_ms = r.karts[1].finished_ms = 40000   # tied finish
+        want = [k.id for k in r.standings()]
+        rng = Rng(9)
+        for _ in range(20):
+            shuffled = list(r.karts)
+            for i in range(len(shuffled) - 1, 0, -1):
+                j = rng.randrange(i + 1)
+                shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+            r.karts = shuffled
+            self.assertEqual([k.id for k in r.standings()], want)
+        self.assertEqual(want[:2], [1, 3])
+
+
 class PartyPacketTests(unittest.TestCase):
     """Anyone on the network can send packets; junk must be dropped, not crash."""
 

@@ -5,7 +5,7 @@ import math
 from rng import Rng
 from badgeware import State
 from config import CHARACTERS, TRACKS, DIFFICULTY, ITEM_NAMES, POINTS
-from race import Race, Entrant, HUMAN, CPU, REMOTE, COUNTDOWN, RACING, DONE, award_points, finish_unfinished
+from race import Race, Entrant, HUMAN, CPU, REMOTE, COUNTDOWN, RACING, DONE, award_points, finish_unfinished, cup_order
 from render import World
 from lights import Lights, OFF, COUNTDOWN as L_COUNT, DRIFT, FINAL, CHASE, LOBBY
 from controls import Controls, menu_move, back, chord
@@ -54,6 +54,7 @@ class Game:
         self.track = 0
         self.cup_race = 0
         self.totals = {}
+        self.last_order = []
         self.race = None
         self.world = None
         self.me = 0              # index of this badge's kart in the race
@@ -259,6 +260,7 @@ class Game:
             self.difficulty = self.cursor
             self.cup_race = 0
             self.totals = {}
+            self.last_order = []
             self.start_race(0)
 
     def tracksel(self):
@@ -315,7 +317,7 @@ class Game:
             ents = [Entrant(self.char, HUMAN)] + [Entrant(i, CPU) for i in others]
             if self.mode == GP and self.cup_race > 0:
                 # grid by points: the leader starts on pole
-                order = sorted(range(4), key=lambda i: -self.totals.get(i, 0))
+                order = cup_order(self.totals, self.last_order, 4)
                 grid = [0] * 4
                 for slot, idx in enumerate(order):
                     grid[idx] = slot
@@ -507,6 +509,7 @@ class Game:
             self.new_record = False
         if self.mode == GP:
             award_points(r.finish_order, self.totals)
+            self.last_order = list(r.finish_order)
         self.go(RESULTS)
 
     def paused(self):
@@ -591,7 +594,7 @@ class Game:
         panel(24, 20, W - 48, 196)
         last = self.cup_race == len(TRACKS) - 1
         ui.heading("Cup standings" + (" - final" if last else ""), 24, a, 16)
-        order = sorted(range(4), key=lambda i: -self.totals.get(i, 0))
+        order = cup_order(self.totals, self.last_order, 4)
         for place, idx in enumerate(order):
             ch = self.race.entrants[idx].char
             y = 52 + place * 30
@@ -625,7 +628,7 @@ class Game:
         a = self.art
         screen.pen = color.rgb(20, 24, 60)
         screen.rectangle(0, 0, W, H)
-        order = sorted(range(4), key=lambda i: -self.totals.get(i, 0))
+        order = cup_order(self.totals, self.last_order, 4)
         steps = ((1, 120, 140), (0, 150, 120), (2, 90, 156))   # (place, x... )
         heights = {0: 70, 1: 50, 2: 36}
         xs = {0: 136, 1: 76, 2: 196}
@@ -647,7 +650,7 @@ class Game:
         msg = {1: "You won the Octo Cup!", 2: "Silver trophy!", 3: "Bronze trophy!"}.get(place, "Better luck next cup")
         ui.heading(msg, 8, a, 22)
         if place <= 3:
-            screen.blit(a.trophy, rect(W // 2 - 24, 40, 48, 48))
+            screen.blit(a.trophy, rect(W // 2 - 16, 32, 32, 32))
         self.lights.set(CHASE if place == 1 else OFF)
         prompt([("SEL", "menu")], H - 18, a.small)
         if self.since() > 1500 and badge.pressed(BUTTON_SELECT):

@@ -370,7 +370,7 @@ class Party:
                 r.finish_order.append(kidx)
                 # finishers by time; DNFs (no time) stay after them
                 r.finish_order.sort(key=lambda i: (r.karts[i].finished_ms is None,
-                                                   r.karts[i].finished_ms or 0))
+                                                   r.karts[i].finished_ms or 0, i))
 
     def handle_race(self, msg, now):
         pid = msg["id"]
