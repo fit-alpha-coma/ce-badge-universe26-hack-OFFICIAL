@@ -164,6 +164,8 @@ class PagerApp:
         self.deadline = 0
         self.state = "setup" if self.transport.pairing is None else "idle"
         self.result = ""
+        self.result_kind = "defer"
+        self.result_demo = False
         self.result_until = 0
         self.select_started = None
         self.right_started = None
@@ -185,7 +187,7 @@ class PagerApp:
             )
             if same and badge.ticks < valid_until:
                 if self.transport.send_decision(request, decision):
-                    self.finish("decision resent")
+                    self.finish("decision resent", decision)
                 return
         self.request = request
         self.sections = request_sections(request)
@@ -205,14 +207,16 @@ class PagerApp:
                 self.open_request(value)
             elif kind == "cancel" and self.request is not None:
                 if not value.get("id") or value.get("id") == self.request.get("id"):
-                    self.finish("cancelled")
+                    self.finish("cancelled", "cancelled")
             elif kind == "connection":
                 self.connection_note = "Connected" if value else "Connection lost - waiting"
             elif kind == "error":
                 self.connection_note = str(value)
 
-    def finish(self, result):
+    def finish(self, result, kind="defer"):
         self.result = result
+        self.result_kind = kind
+        self.result_demo = bool(self.request and self.request.get("demo"))
         self.state = "result"
         self.result_until = badge.ticks + 2200
         self.request = None
@@ -220,17 +224,23 @@ class PagerApp:
         self.select_started = None
         self.right_started = None
 
-    def decide(self, decision):
+    def decide(self, decision, result=None):
         if self.request is None:
             return
         if decision == "allow" and not self.request.get("allow_remote", True):
             decision = "defer"
+        label = result or {
+            "allow": "approved",
+            "deny": "denied",
+            "defer": "sent to laptop",
+        }[decision]
+        result_kind = "expired" if result == "expired" else decision
         if self.request.get("demo"):
-            self.finish("demo " + decision)
+            self.finish("demo " + label, result_kind)
             return
         if self.transport.send_decision(self.request, decision):
             self.last_decision = (dict(self.request), decision, badge.ticks + 120000)
-            self.finish({"allow": "approved", "deny": "denied", "defer": "sent to laptop"}[decision])
+            self.finish(label, result_kind)
         else:
             self.connection_note = "Could not send - reconnecting"
 
@@ -285,7 +295,7 @@ class PagerApp:
         self.handle_transport()
         self.handle_input()
         if self.state == "request" and badge.ticks >= self.deadline:
-            self.decide("defer")
+            self.decide("defer", "expired")
         if self.state == "result" and badge.ticks >= self.result_until:
             self.state = "idle" if self.transport.pairing else "setup"
         self.update_lights()
@@ -430,25 +440,94 @@ class PagerApp:
             screen.pen = GREEN if self.select_started is not None else BLUE
             screen.shape(shape.rectangle(0, HEIGHT - 3, int(WIDTH * progress), 3))
 
+    def draw_result_icon(self, center_x, center_y, kind, accent):
+        screen.pen = accent
+        if kind == "allow":
+            for offset in (-2, -1, 0, 1, 2):
+                screen.line(
+                    center_x - 18,
+                    center_y + offset,
+                    center_x - 6,
+                    center_y + 12 + offset,
+                )
+                screen.line(
+                    center_x - 6,
+                    center_y + 12 + offset,
+                    center_x + 20,
+                    center_y - 15 + offset,
+                )
+        elif kind == "deny":
+            for offset in (-2, -1, 0, 1, 2):
+                screen.line(
+                    center_x - 15,
+                    center_y - 15 + offset,
+                    center_x + 15,
+                    center_y + 15 + offset,
+                )
+                screen.line(
+                    center_x + 15,
+                    center_y - 15 + offset,
+                    center_x - 15,
+                    center_y + 15 + offset,
+                )
+        elif kind == "expired":
+            screen.shape(shape.circle(center_x, center_y, 20))
+            screen.pen = BG
+            screen.shape(shape.circle(center_x, center_y, 16))
+            screen.pen = accent
+            screen.line(center_x, center_y, center_x, center_y - 10)
+            screen.line(center_x, center_y, center_x + 9, center_y + 6)
+            screen.shape(shape.circle(center_x, center_y, 2))
+        elif kind == "cancelled":
+            screen.shape(
+                shape.rounded_rectangle(center_x - 15, center_y - 15, 30, 30, 4)
+            )
+        else:
+            # A laptop screen with an outward arrow represents native review.
+            screen.shape(
+                shape.rounded_rectangle(center_x - 22, center_y - 16, 44, 29, 4)
+            )
+            screen.pen = BG
+            screen.shape(
+                shape.rounded_rectangle(center_x - 18, center_y - 12, 36, 21, 2)
+            )
+            screen.pen = accent
+            screen.line(center_x - 26, center_y + 17, center_x + 26, center_y + 17)
+            screen.line(center_x - 8, center_y - 1, center_x + 9, center_y - 1)
+            screen.line(center_x + 9, center_y - 1, center_x + 2, center_y - 8)
+            screen.line(center_x + 9, center_y - 1, center_x + 2, center_y + 6)
+
     def draw_result(self):
         self.draw_header("REQUEST CLOSED")
-        good = "approved" in self.result
-        bad = "denied" in self.result
-        accent = GREEN if good else RED if bad else BLUE
+        kind = self.result_kind
+        if kind == "allow":
+            accent = GREEN
+        elif kind in ("deny", "cancelled"):
+            accent = RED
+        elif kind == "expired":
+            accent = ORANGE
+        else:
+            accent = BLUE
         screen.pen = accent
         screen.shape(shape.circle(WIDTH // 2, 103, 42))
         screen.pen = BG
         screen.shape(shape.circle(WIDTH // 2, 103, 34))
-        screen.font = TITLE_FONT
-        screen.pen = accent
-        symbol = "OK" if good else "NO" if bad else ">>"
-        self.center(symbol, 92)
+        self.draw_result_icon(WIDTH // 2, 103, kind, accent)
         screen.font = TITLE_FONT
         screen.pen = TEXT
-        self.center(self.result.upper(), 163)
+        self.center(shorten(self.result.upper(), 34), 163)
         screen.font = BODY_FONT
         screen.pen = MUTED
-        self.center("Copilot has received your decision", 192)
+        if self.result_demo:
+            detail = "Safe demo - no command was run"
+        else:
+            detail = {
+                "allow": "Approved once - no permission saved",
+                "deny": "Copilot received your denial",
+                "expired": "Request returned to your laptop",
+                "cancelled": "Copilot cancelled this request",
+            }.get(kind, "Continue from the laptop prompt")
+        self.center(detail, 192)
 
     def center(self, text, y):
         width, _ = screen.measure_text(text)

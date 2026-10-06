@@ -112,7 +112,11 @@ class BadgeRenderSmokeTests(unittest.TestCase):
             module.app.open_request(module.sample_request())
             module.app.draw()
             module.app.decide("allow")
+            self.assertEqual(module.app.result_kind, "allow")
             module.app.draw()
+            for kind in ("deny", "defer", "expired", "cancelled"):
+                module.app.result_kind = kind
+                module.app.draw()
             module.app.state = "idle"
             module.app.draw()
             self.assertGreater(len(module.wrap_text("x" * 120)), 2)
@@ -128,4 +132,3 @@ class BadgeRenderSmokeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
