@@ -1,0 +1,8 @@
+.host/.venv/
+.host/build/
+.host/dist/
+.host/*.egg-info/
+__pycache__/
+*.pyc
+*.log
+
