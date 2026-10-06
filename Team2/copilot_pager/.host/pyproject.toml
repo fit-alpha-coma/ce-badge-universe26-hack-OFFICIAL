@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "copilot-pager"
+version = "0.1.0"
+description = "Encrypted BLE bridge from GitHub Copilot permission hooks to the Universe badge"
+requires-python = ">=3.11"
+dependencies = ["bleak>=0.22,<4", "cryptography>=42,<47"]
+
+[project.scripts]
+copilot-pager = "copilot_pager_host.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
