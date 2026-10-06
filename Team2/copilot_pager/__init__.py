@@ -6,7 +6,11 @@ import os
 import sys
 
 
-APP_DIR = __file__.rsplit("/", 1)[0] if "/" in __file__ else "/system/apps/copilot_pager"
+try:
+    APP_DIR = __file__.rsplit("/", 1)[0] if "/" in __file__ else "/system/apps/copilot_pager"
+except NameError:
+    # Code pasted into the web simulator executes without a __file__ value.
+    APP_DIR = "/"
 os.chdir(APP_DIR)
 sys.path.insert(0, APP_DIR)
 
@@ -16,13 +20,24 @@ from ble_transport import PagerTransport
 badge.mode(HIRES | VSYNC)
 screen.antialias = image.X2
 
-# The upstream Tufty web simulator predates the Universe 2026 Menu and Back
-# controls. Keep the physical badge mapping, but make its A/B/C model useful for
-# UI previews: Select opens the safe demo and Left doubles as Back.
+# The upstream Tufty web simulator predates the Universe 2026 logical control
+# names plus its Menu and Back controls. Keep the physical badge mapping, but
+# make its A/B/C model useful for UI previews: B opens the safe demo and A
+# doubles as Back.
+SIMULATOR_CONTROLS = False
+try:
+    BUTTON_LEFT
+    BUTTON_SELECT
+    BUTTON_RIGHT
+except NameError:
+    BUTTON_LEFT = BUTTON_A
+    BUTTON_SELECT = BUTTON_B
+    BUTTON_RIGHT = BUTTON_C
+    SIMULATOR_CONTROLS = True
+
 try:
     BUTTON_MENU
     BUTTON_BACK
-    SIMULATOR_CONTROLS = False
 except NameError:
     BUTTON_MENU = BUTTON_SELECT
     BUTTON_BACK = BUTTON_LEFT
@@ -344,7 +359,11 @@ class PagerApp:
         screen.shape(shape.rounded_rectangle(35, 158, WIDTH - 70, 42, 6))
         screen.pen = MUTED
         self.center("No secrets are stored in the app", 170)
-        demo_control = "SELECT: preview a safe demo" if SIMULATOR_CONTROLS else "MENU: preview a safe demo"
+        demo_control = (
+            "SELECT: preview a safe demo"
+            if SIMULATOR_CONTROLS
+            else "MENU: preview a safe demo"
+        )
         self.center(demo_control, 187)
         if self.transport.error and self.transport.error != "Not paired":
             screen.pen = RED
@@ -466,6 +485,13 @@ def update():
 
 def on_exit():
     app.exit()
+
+
+if SIMULATOR_CONTROLS:
+    _simulator_run = run
+
+    def run(update_function, on_exit=None):
+        _simulator_run(update_function)
 
 
 badge.default_clear = BG

@@ -32,6 +32,30 @@ in this repository.
 The Menu pad opens a labeled, non-executing sample request from the setup or
 idle screen. The case lights chase while a real decision is pending.
 
+## Try it virtually
+
+Open the [Badgeware Web Simulator](https://try.badgewa.re). In its Files panel,
+upload these three files from this folder:
+
+- `__init__.py`
+- `ble_transport.py`
+- `pager_protocol.py`
+
+Open the uploaded `__init__.py` and press **Run** (or F5). Click the virtual
+badge once to give it keyboard focus, then use:
+
+| Key | Virtual action |
+| --- | --- |
+| Space | Open the safe demo; hold to approve |
+| Left arrow | Deny |
+| Right arrow | Change section; hold to defer |
+| Up / Down arrows | Scroll |
+| Escape | Home |
+
+The demo is clearly labeled and cannot execute a command. The public simulator
+models the older A/B/C controls, so Space stands in for the 2026 Menu control on
+the setup screen. It verifies the interface and decision flow, not Bluetooth.
+
 ## Install
 
 The badge app uses only the firmware modules. The laptop companion requires
@@ -125,10 +149,10 @@ python3 .github/skills/badge-app-builder/scripts/validate_app.py \
 python3 .github/skills/badge-app-builder/scripts/validate_submissions.py Team2
 ```
 
-The simulator can verify every screen and control using Menu demo mode, but it
-cannot emulate Bluetooth. Before relying on real approvals, test advertising,
-round trips, reconnects, range, case lights, and sustained scrolling on a
-physical 2026 badge.
+The simulator can verify the screens and decision controls using its safe demo,
+but it cannot emulate Bluetooth or the dedicated 2026 Menu/Back touch pads.
+Before relying on real approvals, test advertising, round trips, reconnects,
+range, case lights, and sustained scrolling on a physical 2026 badge.
 
 ## Troubleshooting
 
@@ -144,4 +168,3 @@ physical 2026 badge.
 To remove the integration without touching other Copilot customizations, run
 `copilot-pager uninstall-hooks`. Pairing data can then be removed from the
 badge's `/state/copilot_pager.json` in USB Disk Mode.
-
