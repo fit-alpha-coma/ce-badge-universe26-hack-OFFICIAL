@@ -65,8 +65,12 @@ HEADER_H = 36
 FOOTER_H = 31
 CONTENT_TOP = HEADER_H + 37
 CONTENT_BOTTOM = HEIGHT - FOOTER_H - 4
-LINE_H = 14
-WRAP_COLUMNS = 49
+BLOCK_LINE_H = 14
+BLOCK_GAP = 5
+BLOCK_LABEL_X = 17
+BLOCK_LABEL_W = 64
+BLOCK_VALUE_X = 88
+BLOCK_VALUE_COLUMNS = 37
 
 
 def clamp(value, low, high):
@@ -78,7 +82,7 @@ def shorten(value, limit):
     return value if len(value) <= limit else value[: max(0, limit - 3)] + "..."
 
 
-def wrap_text(value, columns=WRAP_COLUMNS):
+def wrap_text(value, columns=BLOCK_VALUE_COLUMNS):
     """Small deterministic wrapper that also handles commands without spaces."""
     text = str(value or "")
     lines = []
@@ -97,41 +101,84 @@ def wrap_text(value, columns=WRAP_COLUMNS):
     return lines or [""]
 
 
-def json_pretty(value):
+def json_compact(value):
     try:
-        return json.dumps(value, indent=2, sort_keys=True)
+        return json.dumps(value)
     except (TypeError, ValueError):
         return str(value)
 
 
-def request_sections(request):
-    sections = []
+def request_blocks(request):
+    blocks = []
     summary = request.get("summary") or "%s permission request" % request.get("tool_name", "Tool")
-    sections.append(("SUMMARY", wrap_text(summary)))
+    blocks.append(("SUMMARY", wrap_text(summary)))
     command = request.get("command")
     if command:
-        sections.append(("COMMAND", wrap_text(command)))
+        blocks.append(("COMMAND", wrap_text(command)))
     diff = request.get("diff")
     if diff:
-        sections.append(("CHANGES", wrap_text(diff)))
+        blocks.append(("CHANGES", wrap_text(diff)))
     arguments = request.get("arguments")
     if arguments not in (None, "", {}):
-        value = arguments if isinstance(arguments, str) else json_pretty(arguments)
-        sections.append(("ARGUMENTS", wrap_text(value)))
+        value = arguments if isinstance(arguments, str) else json_compact(arguments)
+        blocks.append(("ARGUMENTS", wrap_text(value)))
     context = request.get("context")
     if context:
-        sections.append(("CONTEXT", wrap_text(context)))
+        blocks.append(("CONTEXT", wrap_text(context)))
     blocked_reason = request.get("blocked_reason")
     if blocked_reason:
-        sections.append(("LAPTOP REQUIRED", wrap_text(blocked_reason)))
+        blocks.append(("LAPTOP", wrap_text(blocked_reason)))
     if request.get("truncated"):
-        sections.append(
+        blocks.append(
             (
                 "LIMIT",
                 wrap_text("Payload was too large for safe remote approval. Review it on the laptop."),
             )
         )
-    return sections
+    return blocks
+
+
+def pack_request_pages(blocks, available_height=None):
+    """Pack several review blocks per page, splitting only when they overflow."""
+    if available_height is None:
+        available_height = CONTENT_BOTTOM - CONTENT_TOP - 10
+    pages = []
+    page = []
+    used = 0
+    for label, source_lines in blocks:
+        lines = list(source_lines) or [""]
+        first_chunk = True
+        if page:
+            full_height = BLOCK_GAP + len(lines) * BLOCK_LINE_H
+            fits_empty_page = len(lines) * BLOCK_LINE_H <= available_height
+            if used + full_height > available_height and fits_empty_page:
+                pages.append(page)
+                page = []
+                used = 0
+        while lines:
+            gap = BLOCK_GAP if page else 0
+            capacity = int((available_height - used - gap) // BLOCK_LINE_H)
+            if capacity < 1:
+                pages.append(page)
+                page = []
+                used = 0
+                continue
+            chunk = lines[:capacity]
+            lines = lines[capacity:]
+            page.append((label if first_chunk else label + "+", chunk))
+            used += gap + len(chunk) * BLOCK_LINE_H
+            first_chunk = False
+            if lines:
+                pages.append(page)
+                page = []
+                used = 0
+    if page:
+        pages.append(page)
+    return pages or [[("DETAILS", ["No details supplied"])]]
+
+
+def request_pages(request):
+    return pack_request_pages(request_blocks(request))
 
 
 def sample_request():
@@ -158,9 +205,8 @@ class PagerApp:
     def __init__(self):
         self.transport = PagerTransport()
         self.request = None
-        self.sections = []
-        self.section = 0
-        self.scroll = 0
+        self.pages = []
+        self.page = 0
         self.deadline = 0
         self.state = "setup" if self.transport.pairing is None else "idle"
         self.result = ""
@@ -190,9 +236,8 @@ class PagerApp:
                     self.finish("decision resent", decision)
                 return
         self.request = request
-        self.sections = request_sections(request)
-        self.section = 0
-        self.scroll = 0
+        self.pages = request_pages(request)
+        self.page = 0
         self.deadline = badge.ticks + clamp(int(request.get("timeout_ms", 90000)), 1000, 90000)
         self.last_repo = request.get("repo") or self.last_repo
         self.state = "request"
@@ -220,7 +265,7 @@ class PagerApp:
         self.state = "result"
         self.result_until = badge.ticks + 2200
         self.request = None
-        self.sections = []
+        self.pages = []
         self.select_started = None
         self.right_started = None
 
@@ -269,9 +314,8 @@ class PagerApp:
                 return
         if badge.released(BUTTON_RIGHT):
             duration = now - self.right_started if self.right_started is not None else 0
-            if not self.hold_action_done and duration < 1000 and self.sections:
-                self.section = (self.section + 1) % len(self.sections)
-                self.scroll = 0
+            if not self.hold_action_done and duration < 1000 and len(self.pages) > 1:
+                self.page = (self.page + 1) % len(self.pages)
             self.right_started = None
 
     def handle_input(self):
@@ -284,11 +328,9 @@ class PagerApp:
             self.decide("deny")
             return
         if badge.pressed(BUTTON_UP):
-            self.scroll = max(0, self.scroll - 1)
-        if badge.pressed(BUTTON_DOWN):
-            lines = self.sections[self.section][1] if self.sections else []
-            visible = max(1, (CONTENT_BOTTOM - CONTENT_TOP) // LINE_H)
-            self.scroll = min(max(0, len(lines) - visible), self.scroll + 1)
+            self.page = max(0, self.page - 1)
+        if badge.pressed(BUTTON_DOWN) and self.pages:
+            self.page = min(len(self.pages) - 1, self.page + 1)
         self.update_holds()
 
     def tick(self):
@@ -390,34 +432,33 @@ class PagerApp:
         screen.pen = BG
         screen.text(tool, 18, 49)
         screen.pen = TEXT
-        screen.text(shorten(request.get("repo", "Unknown repository"), 27), 109, 48)
+        screen.text(shorten(request.get("repo", "Unknown repository"), 21), 109, 48)
         screen.pen = MUTED
         timer = "%02ds" % remaining
+        if len(self.pages) > 1:
+            timer = "%d/%d  %s" % (self.page + 1, len(self.pages), timer)
         timer_width, _ = screen.measure_text(timer)
         screen.text(timer, WIDTH - timer_width - 11, 48)
 
-        label, lines = self.sections[self.section] if self.sections else ("DETAILS", ["No details supplied"])
         screen.pen = PANEL
         screen.shape(shape.rounded_rectangle(9, CONTENT_TOP - 3, WIDTH - 18, CONTENT_BOTTOM - CONTENT_TOP + 6, 6))
-        screen.pen = BLUE
-        screen.text("%s  %d/%d" % (label, self.section + 1, len(self.sections)), 17, CONTENT_TOP + 2)
-        y = CONTENT_TOP + 19
-        visible = max(1, (CONTENT_BOTTOM - y) // LINE_H)
-        screen.font = CODE_FONT if label in ("COMMAND", "CHANGES", "ARGUMENTS") else BODY_FONT
-        for line in lines[self.scroll : self.scroll + visible]:
-            screen.pen = GREEN if line.startswith("+") else RED if line.startswith("-") else TEXT
-            screen.text(shorten(line, WRAP_COLUMNS + 3), 17, y)
-            y += LINE_H
-        if len(lines) > visible:
-            track_y = CONTENT_TOP + 20
-            track_h = CONTENT_BOTTOM - track_y - 5
-            thumb_h = max(10, int(track_h * visible / len(lines)))
-            maximum = max(1, len(lines) - visible)
-            thumb_y = track_y + int((track_h - thumb_h) * self.scroll / maximum)
-            screen.pen = BORDER
-            screen.shape(shape.rounded_rectangle(WIDTH - 14, track_y, 3, track_h, 1))
-            screen.pen = BLUE
-            screen.shape(shape.rounded_rectangle(WIDTH - 14, thumb_y, 3, thumb_h, 1))
+        page = self.pages[self.page] if self.pages else [("DETAILS", ["No details supplied"])]
+        y = CONTENT_TOP + 5
+        for index, (label, lines) in enumerate(page):
+            if index:
+                y += BLOCK_GAP
+            screen.font = BODY_FONT
+            warning = label.startswith(("LAPTOP", "LIMIT"))
+            screen.pen = PANEL_2
+            screen.shape(shape.rounded_rectangle(BLOCK_LABEL_X - 4, y - 2, BLOCK_LABEL_W, 15, 3))
+            screen.pen = ORANGE if warning else BLUE
+            screen.text(shorten(label, 11), BLOCK_LABEL_X, y)
+            code_label = label.rstrip("+")
+            screen.font = CODE_FONT if code_label in ("COMMAND", "CHANGES", "ARGUMENTS") else BODY_FONT
+            for line in lines:
+                screen.pen = GREEN if line.startswith("+") else RED if line.startswith("-") else TEXT
+                screen.text(shorten(line, BLOCK_VALUE_COLUMNS + 2), BLOCK_VALUE_X, y)
+                y += BLOCK_LINE_H
         self.draw_footer(request)
 
     def draw_footer(self, request):

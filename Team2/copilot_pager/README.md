@@ -22,8 +22,8 @@ in this repository.
 
 | Control | Pending request |
 | --- | --- |
-| Up / Down | Scroll wrapped code and arguments |
-| Right tap | Move to the next detail section |
+| Up / Down | Change overflow page, when one is needed |
+| Right tap | Move to the next overflow page |
 | Hold Select for 1 second | Approve this invocation once |
 | Left or Back | Deny |
 | Hold Right for 1 second | Defer to Copilot's normal laptop prompt |
@@ -48,8 +48,8 @@ badge once to give it keyboard focus, then use:
 | --- | --- |
 | Space | Open the safe demo; hold to approve |
 | Left arrow | Deny |
-| Right arrow | Change section; hold to defer |
-| Up / Down arrows | Scroll |
+| Right arrow | Next overflow page; hold to defer |
+| Up / Down arrows | Change overflow page |
 | Escape | Home |
 
 The demo is clearly labeled and cannot execute a command. The public simulator
@@ -106,11 +106,13 @@ The bridge waits at most two seconds for an initially offline badge and at most
 
 ## What appears on the badge
 
-The 320×240 interface has GitHub Primer-inspired colors and separate Summary,
-Command, Changes, Arguments, and Context pages. Requests are limited to 16 KiB.
-If the full operation does not fit, approval is disabled and the badge directs
-you to the laptop. Sandbox-bypass requests behave the same way because Copilot
-requires those escalations to be confirmed locally.
+The 320×240 interface has GitHub Primer-inspired colors and puts Summary,
+Command, Changes, Arguments, and Context together in one compact review. Only
+content that genuinely overflows is packed into additional pages, with a page
+indicator next to the timer. Requests are limited to 16 KiB. If the full
+operation does not fit, approval is disabled and the badge directs you to the
+laptop. Sandbox-bypass requests behave the same way because Copilot requires
+those escalations to be confirmed locally.
 
 Risk colors are informational. The project never auto-approves requests and
 never creates session-wide or permanent tool permissions.

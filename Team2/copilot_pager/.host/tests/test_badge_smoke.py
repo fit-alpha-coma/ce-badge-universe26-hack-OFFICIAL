@@ -110,6 +110,9 @@ class BadgeRenderSmokeTests(unittest.TestCase):
 
             module.app.draw()
             module.app.open_request(module.sample_request())
+            self.assertEqual(len(module.app.pages), 1)
+            labels = [label for label, _lines in module.app.pages[0]]
+            self.assertEqual(labels, ["SUMMARY", "COMMAND", "ARGUMENTS", "CONTEXT"])
             module.app.draw()
             module.app.decide("allow")
             self.assertEqual(module.app.result_kind, "allow")
@@ -120,6 +123,27 @@ class BadgeRenderSmokeTests(unittest.TestCase):
             module.app.state = "idle"
             module.app.draw()
             self.assertGreater(len(module.wrap_text("x" * 120)), 2)
+
+            long_request = module.sample_request()
+            long_request["diff"] = "\n".join(
+                "+changed line %02d with enough detail to wrap" % index
+                for index in range(24)
+            )
+            pages = module.request_pages(long_request)
+            self.assertGreater(len(pages), 1)
+            available = module.CONTENT_BOTTOM - module.CONTENT_TOP - 10
+            for page in pages:
+                height = sum(len(lines) * module.BLOCK_LINE_H for _label, lines in page)
+                height += max(0, len(page) - 1) * module.BLOCK_GAP
+                self.assertLessEqual(height, available)
+
+            balanced = module.pack_request_pages(
+                [(label, ["one", "two", "three"]) for label in ("A", "B", "C", "D")]
+            )
+            self.assertEqual(
+                [[label for label, _lines in page] for page in balanced],
+                [["A", "B"], ["C", "D"]],
+            )
         finally:
             os.chdir(old_cwd)
             sys.path[:] = old_path
