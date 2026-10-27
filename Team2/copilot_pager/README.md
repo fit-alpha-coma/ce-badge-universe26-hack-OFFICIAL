@@ -22,15 +22,15 @@ in this repository.
 
 | Control | Pending request |
 | --- | --- |
-| Up / Down | Scroll wrapped code and arguments |
-| Right tap | Move to the next detail section |
+| Up / Down | Change overflow page, when one is needed |
+| Right tap | Move to the next overflow page |
 | Hold Select for 1 second | Approve this invocation once |
 | Left or Back | Deny |
 | Hold Right for 1 second | Defer to Copilot's normal laptop prompt |
 | Home | Return to the badge launcher |
 
-The Menu pad opens a labeled, non-executing sample request from the setup or
-idle screen. The case lights chase while a real decision is pending.
+A short Select/Enter press opens a labeled, non-executing sample request from
+the setup or idle screen. The case lights chase while a real decision is pending.
 
 ## Try it virtually
 
@@ -48,13 +48,13 @@ badge once to give it keyboard focus, then use:
 | --- | --- |
 | Space | Open the safe demo; hold to approve |
 | Left arrow | Deny |
-| Right arrow | Change section; hold to defer |
-| Up / Down arrows | Scroll |
+| Right arrow | Next overflow page; hold to defer |
+| Up / Down arrows | Change overflow page |
 | Escape | Home |
 
 The demo is clearly labeled and cannot execute a command. The public simulator
-models the older A/B/C controls, so Space stands in for the 2026 Menu control on
-the setup screen. It verifies the interface and decision flow, not Bluetooth.
+maps Space to the badge's Select/Enter control. It verifies the interface and
+decision flow, not Bluetooth.
 
 ## Install
 
@@ -90,9 +90,12 @@ running in a terminal:
 copilot-pager serve
 ```
 
-Start a new Copilot CLI session after installing the hook. In VS Code, select
-the **Copilot** session target (Agent Host); it uses the same Copilot SDK hook
-contract. Run a harmless sample end to end with:
+Start a new Copilot CLI or VS Code Copilot session after installing the hook.
+The user hook includes both contracts: CLI permission prompts use
+`permissionRequest`, while the shared Copilot harness in VS Code uses
+`preToolUse`. Select **Copilot** as the VS Code Session Target. Pager intercepts
+shell commands, edits, file creation, and web fetches; read-only tools continue
+without paging. Run a harmless sample end to end with:
 
 ```sh
 copilot-pager doctor
@@ -106,11 +109,13 @@ The bridge waits at most two seconds for an initially offline badge and at most
 
 ## What appears on the badge
 
-The 320×240 interface has GitHub Primer-inspired colors and separate Summary,
-Command, Changes, Arguments, and Context pages. Requests are limited to 16 KiB.
-If the full operation does not fit, approval is disabled and the badge directs
-you to the laptop. Sandbox-bypass requests behave the same way because Copilot
-requires those escalations to be confirmed locally.
+The 320×240 interface has GitHub Primer-inspired colors and puts Summary,
+Command, Changes, Arguments, and Context together in one compact review. Only
+content that genuinely overflows is packed into additional pages, with a page
+indicator next to the timer. Requests are limited to 16 KiB. If the full
+operation does not fit, approval is disabled and the badge directs you to the
+laptop. Sandbox-bypass requests behave the same way because Copilot requires
+those escalations to be confirmed locally.
 
 Risk colors are informational. The project never auto-approves requests and
 never creates session-wide or permanent tool permissions.
@@ -129,11 +134,10 @@ never creates session-wide or permanent tool permissions.
   random token. Payloads and decisions are not persisted or logged.
 - One badge pairs to one laptop in v1. Run `pair --force` to replace that trust.
 
-The optional VS Code Local-harness adapter is in
+The optional legacy VS Code Local-harness adapter is in
 `.host/templates/vscode-local-preview.json`. It is not installed automatically:
-the Local hooks feature is Preview and uses a different `PreToolUse` contract.
-Its adapter sends only shell, edit, create, and web-fetch tools to the badge and
-returns `ask` when Pager defers.
+the older Local target uses a different `PreToolUse` contract. New Copilot
+target sessions use the installed `preToolUse` hook and do not need this file.
 
 ## Checks
 
@@ -150,7 +154,7 @@ python3 .github/skills/badge-app-builder/scripts/validate_submissions.py Team2
 ```
 
 The simulator can verify the screens and decision controls using its safe demo,
-but it cannot emulate Bluetooth or the dedicated 2026 Menu/Back touch pads.
+but it cannot emulate Bluetooth or the physical badge's capacitive controls.
 Before relying on real approvals, test advertising, round trips, reconnects,
 range, case lights, and sustained scrolling on a physical 2026 badge.
 

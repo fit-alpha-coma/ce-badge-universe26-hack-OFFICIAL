@@ -1,7 +1,8 @@
 .host/.venv/
 .host/build/
 .host/dist/
-.host/*.egg-info/
+*.egg-info/
+.demo/
 __pycache__/
 *.pyc
 *.log

@@ -414,6 +414,36 @@ class SkillScriptTests(unittest.TestCase):
                 any(issue.severity == "ERROR" and "Symlinks" in issue.message for issue in issues)
             )
 
+    def test_validator_ignores_hidden_host_environment(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            app_dir = root / "badge" / "apps" / "companion-app"
+            app_dir.mkdir(parents=True)
+            (app_dir / "__init__.py").write_text(
+                "def update():\n    pass\nrun(update)\n", encoding="utf-8"
+            )
+            host_package = app_dir / ".host" / ".venv" / "site-packages"
+            host_package.mkdir(parents=True)
+            (host_package / "desktop_only.py").write_text(
+                "import pathlib\nimport subprocess\n", encoding="utf-8"
+            )
+            (app_dir / ".host" / ".venv" / "python").symlink_to(
+                host_package / "desktop_only.py"
+            )
+
+            issues = validate_app.validate_app(app_dir, root)
+
+            self.assertFalse(
+                any(
+                    issue.severity == "ERROR"
+                    and (
+                        "Desktop-only module" in issue.message
+                        or "Symlinks are not safe" in issue.message
+                    )
+                    for issue in issues
+                )
+            )
+
     def test_deploy_writes_and_backs_up_replacement(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

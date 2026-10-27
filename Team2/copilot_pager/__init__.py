@@ -16,6 +16,10 @@ sys.path.insert(0, APP_DIR)
 
 from ble_transport import PagerTransport
 
+try:
+    COPILOT_LOGO = image.load("assets/copilot_logo.png")
+except (OSError, AttributeError):
+    COPILOT_LOGO = None
 
 badge.mode(HIRES | VSYNC)
 screen.antialias = image.X2
@@ -65,8 +69,12 @@ HEADER_H = 36
 FOOTER_H = 31
 CONTENT_TOP = HEADER_H + 37
 CONTENT_BOTTOM = HEIGHT - FOOTER_H - 4
-LINE_H = 14
-WRAP_COLUMNS = 49
+BLOCK_LINE_H = 14
+BLOCK_GAP = 5
+BLOCK_LABEL_X = 17
+BLOCK_LABEL_W = 57
+BLOCK_VALUE_X = 79
+BLOCK_VALUE_COLUMNS = 40
 
 
 def clamp(value, low, high):
@@ -78,7 +86,7 @@ def shorten(value, limit):
     return value if len(value) <= limit else value[: max(0, limit - 3)] + "..."
 
 
-def wrap_text(value, columns=WRAP_COLUMNS):
+def wrap_text(value, columns=BLOCK_VALUE_COLUMNS):
     """Small deterministic wrapper that also handles commands without spaces."""
     text = str(value or "")
     lines = []
@@ -97,41 +105,84 @@ def wrap_text(value, columns=WRAP_COLUMNS):
     return lines or [""]
 
 
-def json_pretty(value):
+def json_compact(value):
     try:
-        return json.dumps(value, indent=2, sort_keys=True)
+        return json.dumps(value)
     except (TypeError, ValueError):
         return str(value)
 
 
-def request_sections(request):
-    sections = []
+def request_blocks(request):
+    blocks = []
     summary = request.get("summary") or "%s permission request" % request.get("tool_name", "Tool")
-    sections.append(("SUMMARY", wrap_text(summary)))
+    blocks.append(("SUMMARY", wrap_text(summary)))
     command = request.get("command")
     if command:
-        sections.append(("COMMAND", wrap_text(command)))
+        blocks.append(("COMMAND", wrap_text(command)))
     diff = request.get("diff")
     if diff:
-        sections.append(("CHANGES", wrap_text(diff)))
+        blocks.append(("CHANGES", wrap_text(diff)))
     arguments = request.get("arguments")
     if arguments not in (None, "", {}):
-        value = arguments if isinstance(arguments, str) else json_pretty(arguments)
-        sections.append(("ARGUMENTS", wrap_text(value)))
+        value = arguments if isinstance(arguments, str) else json_compact(arguments)
+        blocks.append(("ARGS", wrap_text(value)))
     context = request.get("context")
     if context:
-        sections.append(("CONTEXT", wrap_text(context)))
+        blocks.append(("CONTEXT", wrap_text(context)))
     blocked_reason = request.get("blocked_reason")
     if blocked_reason:
-        sections.append(("LAPTOP REQUIRED", wrap_text(blocked_reason)))
+        blocks.append(("LAPTOP", wrap_text(blocked_reason)))
     if request.get("truncated"):
-        sections.append(
+        blocks.append(
             (
                 "LIMIT",
                 wrap_text("Payload was too large for safe remote approval. Review it on the laptop."),
             )
         )
-    return sections
+    return blocks
+
+
+def pack_request_pages(blocks, available_height=None):
+    """Pack several review blocks per page, splitting only when they overflow."""
+    if available_height is None:
+        available_height = CONTENT_BOTTOM - CONTENT_TOP - 10
+    pages = []
+    page = []
+    used = 0
+    for label, source_lines in blocks:
+        lines = list(source_lines) or [""]
+        first_chunk = True
+        if page:
+            full_height = BLOCK_GAP + len(lines) * BLOCK_LINE_H
+            fits_empty_page = len(lines) * BLOCK_LINE_H <= available_height
+            if used + full_height > available_height and fits_empty_page:
+                pages.append(page)
+                page = []
+                used = 0
+        while lines:
+            gap = BLOCK_GAP if page else 0
+            capacity = int((available_height - used - gap) // BLOCK_LINE_H)
+            if capacity < 1:
+                pages.append(page)
+                page = []
+                used = 0
+                continue
+            chunk = lines[:capacity]
+            lines = lines[capacity:]
+            page.append((label if first_chunk else label + "+", chunk))
+            used += gap + len(chunk) * BLOCK_LINE_H
+            first_chunk = False
+            if lines:
+                pages.append(page)
+                page = []
+                used = 0
+    if page:
+        pages.append(page)
+    return pages or [[("DETAILS", ["No details supplied"])]]
+
+
+def request_pages(request):
+    return pack_request_pages(request_blocks(request))
 
 
 def sample_request():
@@ -150,6 +201,7 @@ def sample_request():
         "allow_remote": True,
         "timeout_ms": 90000,
         "demo": True,
+        "local_demo": True,
     }
     return value
 
@@ -157,10 +209,16 @@ def sample_request():
 class PagerApp:
     def __init__(self):
         self.transport = PagerTransport()
+        if SIMULATOR_CONTROLS and self.transport.pairing is None:
+            # Fake pairing for simulator preview of the idle screen
+            self.transport.pairing = {
+                "key": b"\x00" * 32,
+                "device_id": "simulator",
+                "laptop": "Simulator Preview",
+            }
         self.request = None
-        self.sections = []
-        self.section = 0
-        self.scroll = 0
+        self.pages = []
+        self.page = 0
         self.deadline = 0
         self.state = "setup" if self.transport.pairing is None else "idle"
         self.result = ""
@@ -190,9 +248,8 @@ class PagerApp:
                     self.finish("decision resent", decision)
                 return
         self.request = request
-        self.sections = request_sections(request)
-        self.section = 0
-        self.scroll = 0
+        self.pages = request_pages(request)
+        self.page = 0
         self.deadline = badge.ticks + clamp(int(request.get("timeout_ms", 90000)), 1000, 90000)
         self.last_repo = request.get("repo") or self.last_repo
         self.state = "request"
@@ -220,7 +277,7 @@ class PagerApp:
         self.state = "result"
         self.result_until = badge.ticks + 2200
         self.request = None
-        self.sections = []
+        self.pages = []
         self.select_started = None
         self.right_started = None
 
@@ -235,7 +292,7 @@ class PagerApp:
             "defer": "sent to laptop",
         }[decision]
         result_kind = "expired" if result == "expired" else decision
-        if self.request.get("demo"):
+        if self.request.get("local_demo"):
             self.finish("demo " + label, result_kind)
             return
         if self.transport.send_decision(self.request, decision):
@@ -269,14 +326,25 @@ class PagerApp:
                 return
         if badge.released(BUTTON_RIGHT):
             duration = now - self.right_started if self.right_started is not None else 0
-            if not self.hold_action_done and duration < 1000 and self.sections:
-                self.section = (self.section + 1) % len(self.sections)
-                self.scroll = 0
+            if not self.hold_action_done and duration < 1000 and len(self.pages) > 1:
+                self.page = (self.page + 1) % len(self.pages)
             self.right_started = None
 
     def handle_input(self):
-        if self.state in ("setup", "idle") and badge.pressed(BUTTON_MENU):
+        # The desktop simulator has no companion daemon, so Enter opens a
+        # preview there.  On physical hardware Enter must never manufacture a
+        # request: doing so can make a user believe the bundled sample is the
+        # permission request they are waiting for.
+        if (
+            SIMULATOR_CONTROLS
+            and self.state in ("setup", "idle")
+            and badge.pressed(BUTTON_SELECT)
+        ):
             self.open_request(sample_request())
+            return
+        if SIMULATOR_CONTROLS and self.state in ("setup", "idle") and badge.pressed(BUTTON_BACK):
+            # Toggle between setup and idle screens in the simulator
+            self.state = "idle" if self.state == "setup" else "setup"
             return
         if self.state != "request":
             return
@@ -284,11 +352,9 @@ class PagerApp:
             self.decide("deny")
             return
         if badge.pressed(BUTTON_UP):
-            self.scroll = max(0, self.scroll - 1)
-        if badge.pressed(BUTTON_DOWN):
-            lines = self.sections[self.section][1] if self.sections else []
-            visible = max(1, (CONTENT_BOTTOM - CONTENT_TOP) // LINE_H)
-            self.scroll = min(max(0, len(lines) - visible), self.scroll + 1)
+            self.page = max(0, self.page - 1)
+        if badge.pressed(BUTTON_DOWN) and self.pages:
+            self.page = min(len(self.pages) - 1, self.page + 1)
         self.update_holds()
 
     def tick(self):
@@ -341,11 +407,18 @@ class PagerApp:
             screen.shape(shape.circle(center_x, center_y, radius))
             screen.pen = BG
             screen.shape(shape.circle(center_x, center_y, radius - 2))
-        screen.pen = PURPLE
-        screen.shape(shape.rounded_rectangle(center_x - 27, center_y - 20, 54, 40, 9))
-        screen.pen = BG
-        screen.shape(shape.circle(center_x - 10, center_y, 5))
-        screen.shape(shape.circle(center_x + 10, center_y, 5))
+        # GitHub Copilot logo
+        if COPILOT_LOGO is not None:
+            logo_x = center_x - COPILOT_LOGO.width // 2
+            logo_y = center_y - COPILOT_LOGO.height // 2
+            screen.blit(COPILOT_LOGO, vec2(logo_x, logo_y))
+        else:
+            # Fallback: simple purple circle with goggles
+            screen.pen = PURPLE
+            screen.shape(shape.circle(center_x, center_y, 26))
+            screen.pen = BG
+            screen.shape(shape.circle(center_x - 10, center_y, 6))
+            screen.shape(shape.circle(center_x + 10, center_y, 6))
         screen.font = BODY_FONT
         screen.pen = TEXT
         self.center("LINKED" if self.transport.connected else "READY TO CONNECT", 167)
@@ -353,7 +426,10 @@ class PagerApp:
         self.center(shorten(self.transport.laptop, 38), 187)
         self.center(shorten(self.last_repo, 46), 202)
         screen.pen = BORDER
-        self.center("MENU: SAFE DEMO", 224)
+        if SIMULATOR_CONTROLS:
+            self.center("SPACE: demo / LEFT: setup screen", 224)
+        else:
+            self.center("LISTENING FOR COPILOT REQUESTS", 224)
 
     def draw_setup(self):
         self.draw_header("PAGER SETUP")
@@ -369,12 +445,10 @@ class PagerApp:
         screen.shape(shape.rounded_rectangle(35, 158, WIDTH - 70, 42, 6))
         screen.pen = MUTED
         self.center("No secrets are stored in the app", 170)
-        demo_control = (
-            "SELECT: preview a safe demo"
-            if SIMULATOR_CONTROLS
-            else "MENU: preview a safe demo"
-        )
-        self.center(demo_control, 187)
+        if SIMULATOR_CONTROLS:
+            self.center("SPACE: demo / LEFT: idle screen", 187)
+        else:
+            self.center("Waiting for a Copilot request", 187)
         if self.transport.error and self.transport.error != "Not paired":
             screen.pen = RED
             self.center(shorten(self.transport.error, 46), 215)
@@ -390,34 +464,32 @@ class PagerApp:
         screen.pen = BG
         screen.text(tool, 18, 49)
         screen.pen = TEXT
-        screen.text(shorten(request.get("repo", "Unknown repository"), 27), 109, 48)
+        screen.text(shorten(request.get("repo", "Unknown repository"), 21), 109, 48)
         screen.pen = MUTED
         timer = "%02ds" % remaining
+        if len(self.pages) > 1:
+            timer = "%d/%d  %s" % (self.page + 1, len(self.pages), timer)
         timer_width, _ = screen.measure_text(timer)
         screen.text(timer, WIDTH - timer_width - 11, 48)
 
-        label, lines = self.sections[self.section] if self.sections else ("DETAILS", ["No details supplied"])
         screen.pen = PANEL
         screen.shape(shape.rounded_rectangle(9, CONTENT_TOP - 3, WIDTH - 18, CONTENT_BOTTOM - CONTENT_TOP + 6, 6))
-        screen.pen = BLUE
-        screen.text("%s  %d/%d" % (label, self.section + 1, len(self.sections)), 17, CONTENT_TOP + 2)
-        y = CONTENT_TOP + 19
-        visible = max(1, (CONTENT_BOTTOM - y) // LINE_H)
-        screen.font = CODE_FONT if label in ("COMMAND", "CHANGES", "ARGUMENTS") else BODY_FONT
-        for line in lines[self.scroll : self.scroll + visible]:
-            screen.pen = GREEN if line.startswith("+") else RED if line.startswith("-") else TEXT
-            screen.text(shorten(line, WRAP_COLUMNS + 3), 17, y)
-            y += LINE_H
-        if len(lines) > visible:
-            track_y = CONTENT_TOP + 20
-            track_h = CONTENT_BOTTOM - track_y - 5
-            thumb_h = max(10, int(track_h * visible / len(lines)))
-            maximum = max(1, len(lines) - visible)
-            thumb_y = track_y + int((track_h - thumb_h) * self.scroll / maximum)
-            screen.pen = BORDER
-            screen.shape(shape.rounded_rectangle(WIDTH - 14, track_y, 3, track_h, 1))
-            screen.pen = BLUE
-            screen.shape(shape.rounded_rectangle(WIDTH - 14, thumb_y, 3, thumb_h, 1))
+        page = self.pages[self.page] if self.pages else [("DETAILS", ["No details supplied"])]
+        y = CONTENT_TOP + 5
+        for index, (label, lines) in enumerate(page):
+            if index:
+                y += BLOCK_GAP
+            screen.font = BODY_FONT
+            warning = label.startswith(("LAPTOP", "LIMIT"))
+            screen.pen = PANEL_2
+            screen.shape(shape.rounded_rectangle(BLOCK_LABEL_X - 4, y - 2, BLOCK_LABEL_W, 15, 3))
+            screen.pen = ORANGE if warning else BLUE
+            screen.text(shorten(label, 11), BLOCK_LABEL_X, y)
+            screen.font = BODY_FONT
+            for line in lines:
+                screen.pen = GREEN if line.startswith("+") else RED if line.startswith("-") else TEXT
+                screen.text(shorten(line, BLOCK_VALUE_COLUMNS + 2), BLOCK_VALUE_X, y)
+                y += BLOCK_LINE_H
         self.draw_footer(request)
 
     def draw_footer(self, request):
@@ -427,13 +499,16 @@ class PagerApp:
         screen.font = BODY_FONT
         screen.pen = RED
         screen.text("< DENY", 10, y + 9)
-        screen.pen = GREEN if request.get("allow_remote", True) else ORANGE
-        approve = "HOLD SEL APPROVE" if request.get("allow_remote", True) else "SEL: LAPTOP ONLY"
-        self.center(approve, y + 9)
         screen.pen = MUTED
-        text = "HOLD > LAPTOP"
-        width, _ = screen.measure_text(text)
-        screen.text(text, WIDTH - width - 9, y + 9)
+        self.center("HOLD > LAPTOP", y + 9)
+        screen.pen = GREEN if request.get("allow_remote", True) else ORANGE
+        approve = (
+            "HOLD ENTER OK"
+            if request.get("allow_remote", True)
+            else "HOLD ENTER LAPTOP"
+        )
+        approve_width, _ = screen.measure_text(approve)
+        screen.text(approve, WIDTH - approve_width - 9, y + 9)
         started = self.select_started if self.select_started is not None else self.right_started
         if started is not None:
             progress = clamp((badge.ticks - started) / 1000.0, 0.0, 1.0)
@@ -566,11 +641,15 @@ def on_exit():
     app.exit()
 
 
-if SIMULATOR_CONTROLS:
-    _simulator_run = run
+_badgeware_run = run
 
-    def run(update_function, on_exit=None):
-        _simulator_run(update_function)
+
+def run(update_function, on_exit=None):
+    """Start on both current Badgeware and older one-argument firmware."""
+    try:
+        _badgeware_run(update_function, on_exit=on_exit)
+    except TypeError:
+        _badgeware_run(update_function)
 
 
 badge.default_clear = BG

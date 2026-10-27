@@ -1,7 +1,9 @@
+import asyncio
 import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import AsyncMock, patch
 
 
 HOST_ROOT = os.path.dirname(os.path.dirname(__file__))
@@ -9,9 +11,9 @@ APP_ROOT = os.path.dirname(HOST_ROOT)
 sys.path.insert(0, os.path.join(HOST_ROOT, "src"))
 sys.path.insert(0, APP_ROOT)
 
-import pager_protocol as badge_protocol
-import ble_transport
-from copilot_pager_host import config, normalize, protocol
+import pager_protocol as badge_protocol  # noqa: E402
+import ble_transport  # noqa: E402
+from copilot_pager_host import bridge, cli, config, normalize, protocol  # noqa: E402
 
 
 class CryptoTests(unittest.TestCase):
@@ -120,6 +122,28 @@ class NormalizeTests(unittest.TestCase):
         self.assertEqual("bash", request["tool_name"])
         self.assertEqual("make test", request["command"])
 
+    def test_vscode_subagent_hook_wrapper_is_unpacked(self):
+        request = normalize.normalize_hook(
+            {
+                "toolName": "Subagent",
+                "toolArgs": {
+                    "kind": "hook",
+                    "toolCallId": "call-1",
+                    "toolName": "bash",
+                    "toolArgs": {
+                        "command": "python3 -c 'print(42)'",
+                        "description": "Run the requested verification",
+                    },
+                    "workingDirectory": "/work/badge-test",
+                },
+            }
+        )
+        self.assertEqual("bash", request["tool_name"])
+        self.assertEqual("python3 -c 'print(42)'", request["command"])
+        self.assertEqual("badge-test", request["repo"])
+        self.assertEqual("call-1", request["tool_call_id"])
+        self.assertEqual("Run the requested verification", request["arguments"]["description"])
+
     def test_oversized_request_is_safe(self):
         request = normalize.normalize_hook(
             {"toolName": "edit", "toolInput": {"diff": "+" + "x" * 20000}}
@@ -132,6 +156,24 @@ class NormalizeTests(unittest.TestCase):
         self.assertEqual({"behavior": "allow"}, normalize.hook_result("allow"))
         self.assertEqual({}, normalize.hook_result("defer"))
         self.assertEqual("deny", normalize.hook_result("deny")["behavior"])
+        self.assertEqual(
+            "allow", normalize.pre_tool_result("allow")["permissionDecision"]
+        )
+        self.assertEqual(
+            "deny", normalize.pre_tool_result("deny")["permissionDecision"]
+        )
+        self.assertEqual(
+            "ask", normalize.pre_tool_result("defer")["permissionDecision"]
+        )
+
+    def test_hook_document_supports_cli_and_vscode(self):
+        hooks = cli.hook_document()["hooks"]
+        self.assertIn("permissionRequest", hooks)
+        self.assertIn("preToolUse", hooks)
+        pre_tool = hooks["preToolUse"][0]
+        self.assertEqual(95, pre_tool["timeoutSec"])
+        self.assertIn("edit", pre_tool["matcher"])
+        self.assertIn("hook-pre-tool", pre_tool["args"])
 
 
 class FakeUUID:
@@ -271,6 +313,84 @@ class ConfigTests(unittest.TestCase):
             os.environ.pop("COPILOT_PAGER_HOME", None)
         else:
             os.environ["COPILOT_PAGER_HOME"] = old
+
+
+class BridgeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_same_vscode_tool_call_is_only_queued_once(self):
+        pager = bridge.PagerBridge(
+            {"key": "11" * 32, "device_id": "pager-12345678"}
+        )
+        request = {
+            "id": "request-1",
+            "session_id": "session-1",
+            "tool_call_id": "call-1",
+        }
+
+        first = asyncio.create_task(pager.submit(request))
+        await asyncio.sleep(0)
+        second = asyncio.create_task(pager.submit({**request, "id": "request-2"}))
+        await asyncio.sleep(0)
+        self.assertEqual(1, pager.queue.qsize())
+        pager.inflight_calls[("session-1", "call-1")].set_result("allow")
+        self.assertEqual(["allow", "allow"], await asyncio.gather(first, second))
+
+    async def test_finds_badge_by_custom_service_without_name(self):
+        pager = bridge.PagerBridge(
+            {"key": "11" * 32, "device_id": "pager-12345678"}
+        )
+        device = type("Device", (), {"name": None})()
+        advertisement = type(
+            "Advertisement",
+            (),
+            {"local_name": None, "service_uuids": [protocol.SERVICE_UUID]},
+        )()
+
+        async def find(match, timeout):
+            self.assertEqual(1.5, timeout)
+            self.assertTrue(match(device, advertisement))
+            return device
+
+        with patch.object(
+            bridge.BleakScanner,
+            "find_device_by_filter",
+            new=AsyncMock(side_effect=find),
+        ):
+            self.assertIs(device, await pager._find(1.5))
+
+    async def test_transient_write_failure_reconnects_same_request(self):
+        pager = bridge.PagerBridge(
+            {"key": "11" * 32, "device_id": "pager-12345678"}
+        )
+        failed_client = AsyncMock()
+        pager.client = failed_client
+        pager.connected = True
+        request = {"id": "request-1", "timeout_ms": 5000}
+        sends = 0
+        connects = 0
+
+        async def connect(timeout):
+            nonlocal connects
+            connects += 1
+            pager.connected = True
+            if connects > 1:
+                pager.client = AsyncMock()
+            return True
+
+        async def send(_request):
+            nonlocal sends
+            sends += 1
+            if sends == 1:
+                raise OSError("link disappeared")
+            pager.current_future.set_result("allow")
+
+        pager.current_future = asyncio.get_running_loop().create_future()
+        with (
+            patch.object(pager, "_connect", new=AsyncMock(side_effect=connect)),
+            patch.object(pager, "_send", new=AsyncMock(side_effect=send)),
+        ):
+            self.assertEqual("allow", await pager._process(request))
+        self.assertEqual(2, sends)
+        failed_client.disconnect.assert_awaited_once()
 
 
 if __name__ == "__main__":

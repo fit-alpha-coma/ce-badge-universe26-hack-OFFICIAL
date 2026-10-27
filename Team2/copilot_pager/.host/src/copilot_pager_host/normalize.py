@@ -28,6 +28,26 @@ def _object(value):
     return {} if value is None else {"value": value}
 
 
+def _unwrap_nested_hook(payload):
+    """Expose the real tool call carried by VS Code's Subagent wrapper."""
+    outer_arguments = _object(
+        _first(payload, "toolInput", "tool_input", "toolArgs", "tool_args", "input")
+    )
+    nested_tool = _first(outer_arguments, "toolName", "tool_name", "tool")
+    nested_kind = str(_first(outer_arguments, "kind") or "").lower()
+    if nested_kind != "hook" or nested_tool is None:
+        return payload
+
+    nested = dict(payload)
+    nested.update(outer_arguments)
+    nested_cwd = _first(
+        outer_arguments, "cwd", "workingDirectory", "working_directory"
+    )
+    if nested_cwd is not None:
+        nested["cwd"] = nested_cwd
+    return nested
+
+
 def _summary(tool, permission, arguments):
     command = _first(arguments, "command", "cmd", "script")
     path = _first(arguments, "path", "filePath", "file_path")
@@ -42,6 +62,7 @@ def _summary(tool, permission, arguments):
 
 
 def normalize_hook(payload):
+    payload = _unwrap_nested_hook(payload)
     arguments = _object(
         _first(payload, "toolInput", "tool_input", "toolArgs", "tool_args", "input")
     )
@@ -66,6 +87,12 @@ def normalize_hook(payload):
         "id": str(uuid.uuid4()),
         "source": str(_first(payload, "source", "client") or "copilot"),
         "session_id": str(_first(payload, "sessionId", "session_id") or ""),
+        # VS Code can expose the same operation through both preToolUse and
+        # permissionRequest.  Preserve its stable call identifier so the
+        # daemon can ask the badge only once for that exact operation.
+        "tool_call_id": str(
+            _first(payload, "toolCallId", "tool_call_id", "callId", "call_id") or ""
+        ),
         "created_at_ms": int(time.time() * 1000),
         "timeout_ms": 90000,
         "repo": os.path.basename(cwd.rstrip(os.sep)) or "Unknown repository",
@@ -106,3 +133,20 @@ def hook_result(decision):
             "interrupt": False,
         }
     return {}
+
+
+def pre_tool_result(decision):
+    if decision == "allow":
+        return {
+            "permissionDecision": "allow",
+            "permissionDecisionReason": "Approved once on Copilot Pager",
+        }
+    if decision == "deny":
+        return {
+            "permissionDecision": "deny",
+            "permissionDecisionReason": "Denied on Copilot Pager",
+        }
+    return {
+        "permissionDecision": "ask",
+        "permissionDecisionReason": "Review this request on the laptop",
+    }

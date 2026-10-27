@@ -234,8 +234,20 @@ def module_root(name: str) -> str:
 
 def local_modules(app_dir: Path) -> set[str]:
     modules = {path.stem for path in app_dir.glob("*.py")}
-    modules.update(path.name for path in app_dir.iterdir() if path.is_dir())
+    modules.update(
+        path.name
+        for path in app_dir.iterdir()
+        if path.is_dir() and not path.name.startswith(".")
+    )
     return modules
+
+
+def included_app_path(path: Path, app_dir: Path) -> bool:
+    """Match deployment filtering for generated and app-private directories."""
+    relative = path.relative_to(app_dir)
+    return not any(
+        part.startswith(".") or part == "__pycache__" for part in relative.parts
+    )
 
 
 class AppVisitor(ast.NodeVisitor):
@@ -446,6 +458,8 @@ def validate_app(app_dir: Path, repo_root: Path, target: str = "both") -> list[I
         )
 
     for path in sorted(app_dir.rglob("*")):
+        if not included_app_path(path, app_dir):
+            continue
         if path.is_symlink():
             issues.append(
                 Issue(
@@ -505,7 +519,7 @@ def validate_app(app_dir: Path, repo_root: Path, target: str = "both") -> list[I
 
     parsed: dict[Path, AppVisitor] = {}
     for python_file in sorted(app_dir.rglob("*.py")):
-        if python_file.is_symlink():
+        if not included_app_path(python_file, app_dir) or python_file.is_symlink():
             continue
         _, visitor = parse_python(python_file, issues)
         if visitor is not None:
@@ -761,7 +775,7 @@ def validate_app(app_dir: Path, repo_root: Path, target: str = "both") -> list[I
     estimated_bytes = 0
     image_count = 0
     for png in sorted(app_dir.rglob("*.png")):
-        if png.is_symlink():
+        if not included_app_path(png, app_dir) or png.is_symlink():
             continue
         try:
             width, height, _, color_type = png_info(png)
