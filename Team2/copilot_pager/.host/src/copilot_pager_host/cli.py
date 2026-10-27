@@ -14,11 +14,21 @@ from .config import (
     load_config,
 )
 from .ipc import request_sync, run_server
-from .normalize import hook_result, normalize_hook
+from .normalize import hook_result, normalize_hook, pre_tool_result
 from .protocol import payload_digest
 
 
 HOOK_FILENAME = "copilot-pager.json"
+SIDE_EFFECTING_TOOLS = {
+    "bash",
+    "powershell",
+    "create",
+    "edit",
+    "str_replace_editor",
+    "apply_patch",
+    "web_fetch",
+}
+SIDE_EFFECTING_MATCHER = "|".join(sorted(SIDE_EFFECTING_TOOLS))
 
 
 def copilot_home():
@@ -32,15 +42,25 @@ def hook_path():
 
 
 def hook_document():
+    command = {
+        "type": "command",
+        "exec": sys.executable,
+        "timeoutSec": 95,
+    }
     return {
         "version": 1,
         "hooks": {
             "permissionRequest": [
                 {
-                    "type": "command",
-                    "exec": sys.executable,
+                    **command,
                     "args": ["-m", "copilot_pager_host.cli", "hook"],
-                    "timeoutSec": 95,
+                }
+            ],
+            "preToolUse": [
+                {
+                    **command,
+                    "args": ["-m", "copilot_pager_host.cli", "hook-pre-tool"],
+                    "matcher": SIDE_EFFECTING_MATCHER,
                 }
             ]
         },
@@ -72,7 +92,7 @@ def command_install(_args):
     destination = hook_path()
     write_private_json(destination, hook_document())
     print("Installed the user-level Copilot hook at %s" % destination)
-    print("It applies to Copilot CLI and VS Code Copilot Agent Host sessions.")
+    print("It applies to Copilot CLI and VS Code Copilot sessions.")
     return 0
 
 
@@ -101,6 +121,27 @@ def command_hook(_args):
     except Exception as error:
         print("Copilot Pager fallback: %s" % error, file=sys.stderr)
         print("{}")
+    return 0
+
+
+def command_hook_pre_tool(_args):
+    """Copilot harness adapter used by VS Code and newer CLI sessions."""
+    try:
+        raw = sys.stdin.buffer.read(1024 * 1024 + 1)
+        if len(raw) > 1024 * 1024:
+            raise RuntimeError("hook payload exceeds 1 MiB")
+        request = normalize_hook(json.loads(raw.decode("utf-8")))
+        if request["tool_name"] not in SIDE_EFFECTING_TOOLS:
+            print("{}")
+            return 0
+        config = load_config(required=True)
+        decision = request_sync(config, "request", request, timeout=92.0).get(
+            "decision", "defer"
+        )
+        print(json.dumps(pre_tool_result(decision), separators=(",", ":")))
+    except Exception as error:
+        print("Copilot Pager preToolUse fallback: %s" % error, file=sys.stderr)
+        print(json.dumps(pre_tool_result("defer"), separators=(",", ":")))
     return 0
 
 
@@ -249,6 +290,9 @@ def build_parser():
     subparsers.add_parser("hook", help="internal Copilot permission hook").set_defaults(
         handler=command_hook
     )
+    subparsers.add_parser(
+        "hook-pre-tool", help="internal Copilot preToolUse hook"
+    ).set_defaults(handler=command_hook_pre_tool)
     subparsers.add_parser(
         "hook-local", help="Preview adapter for VS Code Local hooks"
     ).set_defaults(

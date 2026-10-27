@@ -112,7 +112,7 @@ class BadgeRenderSmokeTests(unittest.TestCase):
             module.app.open_request(module.sample_request())
             self.assertEqual(len(module.app.pages), 1)
             labels = [label for label, _lines in module.app.pages[0]]
-            self.assertEqual(labels, ["SUMMARY", "COMMAND", "ARGUMENTS", "CONTEXT"])
+            self.assertEqual(labels, ["SUMMARY", "COMMAND", "ARGS", "CONTEXT"])
             module.app.draw()
             module.app.decide("allow")
             self.assertEqual(module.app.result_kind, "allow")

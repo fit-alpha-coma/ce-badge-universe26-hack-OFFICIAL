@@ -16,6 +16,10 @@ sys.path.insert(0, APP_DIR)
 
 from ble_transport import PagerTransport
 
+try:
+    COPILOT_LOGO = image.load("assets/copilot_logo.png")
+except (OSError, AttributeError):
+    COPILOT_LOGO = None
 
 badge.mode(HIRES | VSYNC)
 screen.antialias = image.X2
@@ -68,9 +72,9 @@ CONTENT_BOTTOM = HEIGHT - FOOTER_H - 4
 BLOCK_LINE_H = 14
 BLOCK_GAP = 5
 BLOCK_LABEL_X = 17
-BLOCK_LABEL_W = 64
-BLOCK_VALUE_X = 88
-BLOCK_VALUE_COLUMNS = 37
+BLOCK_LABEL_W = 57
+BLOCK_VALUE_X = 79
+BLOCK_VALUE_COLUMNS = 40
 
 
 def clamp(value, low, high):
@@ -121,7 +125,7 @@ def request_blocks(request):
     arguments = request.get("arguments")
     if arguments not in (None, "", {}):
         value = arguments if isinstance(arguments, str) else json_compact(arguments)
-        blocks.append(("ARGUMENTS", wrap_text(value)))
+        blocks.append(("ARGS", wrap_text(value)))
     context = request.get("context")
     if context:
         blocks.append(("CONTEXT", wrap_text(context)))
@@ -197,6 +201,7 @@ def sample_request():
         "allow_remote": True,
         "timeout_ms": 90000,
         "demo": True,
+        "local_demo": True,
     }
     return value
 
@@ -204,6 +209,13 @@ def sample_request():
 class PagerApp:
     def __init__(self):
         self.transport = PagerTransport()
+        if SIMULATOR_CONTROLS and self.transport.pairing is None:
+            # Fake pairing for simulator preview of the idle screen
+            self.transport.pairing = {
+                "key": b"\x00" * 32,
+                "device_id": "simulator",
+                "laptop": "Simulator Preview",
+            }
         self.request = None
         self.pages = []
         self.page = 0
@@ -280,7 +292,7 @@ class PagerApp:
             "defer": "sent to laptop",
         }[decision]
         result_kind = "expired" if result == "expired" else decision
-        if self.request.get("demo"):
+        if self.request.get("local_demo"):
             self.finish("demo " + label, result_kind)
             return
         if self.transport.send_decision(self.request, decision):
@@ -319,8 +331,20 @@ class PagerApp:
             self.right_started = None
 
     def handle_input(self):
-        if self.state in ("setup", "idle") and badge.pressed(BUTTON_MENU):
+        # The desktop simulator has no companion daemon, so Enter opens a
+        # preview there.  On physical hardware Enter must never manufacture a
+        # request: doing so can make a user believe the bundled sample is the
+        # permission request they are waiting for.
+        if (
+            SIMULATOR_CONTROLS
+            and self.state in ("setup", "idle")
+            and badge.pressed(BUTTON_SELECT)
+        ):
             self.open_request(sample_request())
+            return
+        if SIMULATOR_CONTROLS and self.state in ("setup", "idle") and badge.pressed(BUTTON_BACK):
+            # Toggle between setup and idle screens in the simulator
+            self.state = "idle" if self.state == "setup" else "setup"
             return
         if self.state != "request":
             return
@@ -383,11 +407,18 @@ class PagerApp:
             screen.shape(shape.circle(center_x, center_y, radius))
             screen.pen = BG
             screen.shape(shape.circle(center_x, center_y, radius - 2))
-        screen.pen = PURPLE
-        screen.shape(shape.rounded_rectangle(center_x - 27, center_y - 20, 54, 40, 9))
-        screen.pen = BG
-        screen.shape(shape.circle(center_x - 10, center_y, 5))
-        screen.shape(shape.circle(center_x + 10, center_y, 5))
+        # GitHub Copilot logo
+        if COPILOT_LOGO is not None:
+            logo_x = center_x - COPILOT_LOGO.width // 2
+            logo_y = center_y - COPILOT_LOGO.height // 2
+            screen.blit(COPILOT_LOGO, vec2(logo_x, logo_y))
+        else:
+            # Fallback: simple purple circle with goggles
+            screen.pen = PURPLE
+            screen.shape(shape.circle(center_x, center_y, 26))
+            screen.pen = BG
+            screen.shape(shape.circle(center_x - 10, center_y, 6))
+            screen.shape(shape.circle(center_x + 10, center_y, 6))
         screen.font = BODY_FONT
         screen.pen = TEXT
         self.center("LINKED" if self.transport.connected else "READY TO CONNECT", 167)
@@ -395,7 +426,10 @@ class PagerApp:
         self.center(shorten(self.transport.laptop, 38), 187)
         self.center(shorten(self.last_repo, 46), 202)
         screen.pen = BORDER
-        self.center("MENU: SAFE DEMO", 224)
+        if SIMULATOR_CONTROLS:
+            self.center("SPACE: demo / LEFT: setup screen", 224)
+        else:
+            self.center("LISTENING FOR COPILOT REQUESTS", 224)
 
     def draw_setup(self):
         self.draw_header("PAGER SETUP")
@@ -411,12 +445,10 @@ class PagerApp:
         screen.shape(shape.rounded_rectangle(35, 158, WIDTH - 70, 42, 6))
         screen.pen = MUTED
         self.center("No secrets are stored in the app", 170)
-        demo_control = (
-            "SELECT: preview a safe demo"
-            if SIMULATOR_CONTROLS
-            else "MENU: preview a safe demo"
-        )
-        self.center(demo_control, 187)
+        if SIMULATOR_CONTROLS:
+            self.center("SPACE: demo / LEFT: idle screen", 187)
+        else:
+            self.center("Waiting for a Copilot request", 187)
         if self.transport.error and self.transport.error != "Not paired":
             screen.pen = RED
             self.center(shorten(self.transport.error, 46), 215)
@@ -453,8 +485,7 @@ class PagerApp:
             screen.shape(shape.rounded_rectangle(BLOCK_LABEL_X - 4, y - 2, BLOCK_LABEL_W, 15, 3))
             screen.pen = ORANGE if warning else BLUE
             screen.text(shorten(label, 11), BLOCK_LABEL_X, y)
-            code_label = label.rstrip("+")
-            screen.font = CODE_FONT if code_label in ("COMMAND", "CHANGES", "ARGUMENTS") else BODY_FONT
+            screen.font = BODY_FONT
             for line in lines:
                 screen.pen = GREEN if line.startswith("+") else RED if line.startswith("-") else TEXT
                 screen.text(shorten(line, BLOCK_VALUE_COLUMNS + 2), BLOCK_VALUE_X, y)
@@ -468,13 +499,16 @@ class PagerApp:
         screen.font = BODY_FONT
         screen.pen = RED
         screen.text("< DENY", 10, y + 9)
-        screen.pen = GREEN if request.get("allow_remote", True) else ORANGE
-        approve = "HOLD SEL APPROVE" if request.get("allow_remote", True) else "SEL: LAPTOP ONLY"
-        self.center(approve, y + 9)
         screen.pen = MUTED
-        text = "HOLD > LAPTOP"
-        width, _ = screen.measure_text(text)
-        screen.text(text, WIDTH - width - 9, y + 9)
+        self.center("HOLD > LAPTOP", y + 9)
+        screen.pen = GREEN if request.get("allow_remote", True) else ORANGE
+        approve = (
+            "HOLD ENTER OK"
+            if request.get("allow_remote", True)
+            else "HOLD ENTER LAPTOP"
+        )
+        approve_width, _ = screen.measure_text(approve)
+        screen.text(approve, WIDTH - approve_width - 9, y + 9)
         started = self.select_started if self.select_started is not None else self.right_started
         if started is not None:
             progress = clamp((badge.ticks - started) / 1000.0, 0.0, 1.0)
@@ -607,11 +641,15 @@ def on_exit():
     app.exit()
 
 
-if SIMULATOR_CONTROLS:
-    _simulator_run = run
+_badgeware_run = run
 
-    def run(update_function, on_exit=None):
-        _simulator_run(update_function)
+
+def run(update_function, on_exit=None):
+    """Start on both current Badgeware and older one-argument firmware."""
+    try:
+        _badgeware_run(update_function, on_exit=on_exit)
+    except TypeError:
+        _badgeware_run(update_function)
 
 
 badge.default_clear = BG
